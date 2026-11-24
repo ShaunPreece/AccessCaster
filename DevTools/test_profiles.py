@@ -580,7 +580,7 @@ def profile(**routing):
 
 def apply_pro2(prof):
     with as_device(devices.PRO2), recorder() as calls:
-        res = profiles.apply(prof, fader_count=9, fader_code_set=devices.PRO2.fader.code_set)
+        res = profiles.apply(prof, fader_spec=devices.PRO2.fader)
         return list(calls), res
 
 
@@ -699,6 +699,46 @@ calls_old, _ = apply_pro2(profile(usb_multitrack=1))
 check("a profile with no expanded key restores as Standard",
       args_of(calls_old, "set_usb_multitrack_mode"), [(1,)])
 
+print("\nRESTORE: an Expanded layout onto a desk in Standard")
+# Game, Music, A and B (12-15) are fader sources only in Expanded. The restore has to put the desk in
+# Expanded BEFORE the layout, and judge the layout by the mode it has just set rather than the one
+# the desk was in when the restore began, or those faders are dropped without a word.
+EXP_FADERS = [0, 1, 2, 3, 10, 11, 12, 13, 14]
+with patched((channels, {"usb_expanded": lambda: False})):
+    calls_up, res_up = apply_pro2(profile(faders=EXP_FADERS, usb_multitrack=2, usb_expanded=True))
+check("the Expanded four land on their faders",
+      [a for a in args_of(calls_up, "set_fader_source") if a[1] >= 12], [(6, 12), (7, 13), (8, 14)])
+check_true("the USB mode is written before the first fader source",
+           names_of(calls_up).index("set_usb_multitrack_mode")
+           < names_of(calls_up).index("set_fader_source"))
+check("and nothing is reported as unrestorable", res_up["errs"], [])
+# With no saved mode the desk stays as it is, so in Standard the four are refused, and SAID.
+with patched((channels, {"usb_expanded": lambda: False})):
+    calls_no, res_no = apply_pro2(profile(faders=EXP_FADERS))
+check("with the desk left in Standard, none of the four is written",
+      [a for a in args_of(calls_no, "set_fader_source") if a[1] >= 12], [])
+check("and each is named in the result", len([e for e in res_no["errs"] if "fader" in e]), 3)
+# A linked pair is not placed by a restore either, and an empty fader is left alone, unreported.
+calls_pair, res_pair = apply_pro2(profile(faders=[4, -1, 2, 3, 10, 11, 7, 8, 9]))
+check("a linked pair is named, an empty fader is not",
+      [e for e in res_pair["errs"] if "fader" in e],
+      ["fader 1: Mic 1 + 2 cannot be placed by a restore, not restored"])
+check("and neither is written", [a for a in args_of(calls_pair, "set_fader_source") if a[0] < 2],
+      [])
+
+print("\nONE FADER GATE: nothing outside devices.py builds its own")
+# `FaderSpec.code_set` knows only the Standard sources. A caller that gates on it directly has a
+# second answer to "what may go on a fader", which goes stale the next time the sources change:
+# the profile restore's copy kept refusing the Expanded four after they became assignable. Every
+# write gate goes through `code_set_for` / `code_order_for`.
+_project = Path(_bootstrap.__file__).resolve().parent.parent / "Project"
+_stray = sorted(f"{p.relative_to(_project)}:{n}"
+                for p in _project.rglob("*.py") if p.name != "devices.py"
+                for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+                if ".code_set" in line.replace(".code_set_for", "")
+                or ".code_order" in line.replace(".code_order_for", ""))
+check("no stray use of the Standard-only fader sets", _stray, [])
+
 print("\nRESTORE on the Duo: the multitrack pair DOES restore, and that is deliberate")
 # The Duo HAS the output_write cap, so it gets these four. That is the right answer rather than a
 # hole: they all sit on the OUTPUT block, which is confirmed on BOTH desks. It does not depend on
@@ -707,7 +747,7 @@ print("\nRESTORE on the Duo: the multitrack pair DOES restore, and that is delib
 with as_device(devices.DUO), recorder() as duo_mt:
     profiles.apply(profile(multitrack=2, processing_bypass=True, usb_multitrack=1,
                                usb_processing_bypass=True),
-                       fader_count=10, fader_code_set=devices.DUO.fader.code_set)
+                       fader_spec=devices.DUO.fader)
     duo_mt = list(duo_mt)
 check("all four land on the Duo too",
       args_of(duo_mt, "set_multitrack_mode") + args_of(duo_mt, "set_recording_processing_bypass")
@@ -727,8 +767,7 @@ print("\nRESTORE on the Duo: levels ARE written")
 # as on a Pro II. What matters is WHICH: the five VIRTUAL faders, indices 4-8. The four physical
 # ones are analog pots and must get nothing.
 with as_device(devices.DUO), recorder() as duo_calls:
-    duo_res = profiles.apply(profile(), fader_count=10,
-                                 fader_code_set=devices.DUO.fader.code_set)
+    duo_res = profiles.apply(profile(), fader_spec=devices.DUO.fader)
     duo_calls = list(duo_calls)
 check("the five VIRTUAL faders are written, and only those",
       sorted(a[0] for a in args_of(duo_calls, "set_fader_level")), [4, 5, 6, 7, 8])
@@ -784,8 +823,8 @@ print("\nRESTORE on the Duo: the desk settings ARE written")
 # than skipping it. The mutes are held back, on both desks, because a restore must never silently
 # mute somebody.
 with as_device(devices.DUO), recorder() as duo_unit_calls:
-    duo_unit_res = profiles.apply(dict(profile(), **{profiles.UNIT_KEY: UNIT}), fader_count=10,
-                                      fader_code_set=devices.DUO.fader.code_set)
+    duo_unit_res = profiles.apply(dict(profile(), **{profiles.UNIT_KEY: UNIT}),
+                                  fader_spec=devices.DUO.fader)
     duo_unit_calls = list(duo_unit_calls)
 duo_unit_written = dict(args_of(duo_unit_calls, "set_unit_setting"))
 check_true("the Duo restores its desk settings", bool(duo_unit_written))

@@ -234,8 +234,7 @@ def restore_profile(name: str, clean: bool = False) -> dict:
                     vec_before = levels_before = None
                     level_note = (" The fader levels could not be read first, so they did not "
                                   "follow their channels. Check the virtual faders' levels.")
-            res = profiles.apply(prof, fader_count=faders.active_faders().vector_length,
-                                 fader_code_set=faders.active_faders().code_set, progress=job.step)
+            res = profiles.apply(prof, fader_spec=spec, progress=job.step)
             if levels_before is not None:
                 level_note = faders.follow_levels(vec_before, faders.read_fader_vector(spec=spec),
                                                   levels_before, spec)

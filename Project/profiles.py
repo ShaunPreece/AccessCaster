@@ -515,9 +515,12 @@ class _Restore:
         return {"applied": self.applied, "failed": self.failed, "errs": self.errs}
 
 
-def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
+def apply(prof, *, fader_spec, progress=None) -> dict:
     """Apply a loaded profile to the device. Returns {applied, failed, errs}. Paces the writes and
     keeps going past an individual failure, so one odd value cannot abort the whole restore.
+
+    `fader_spec` is the connected desk's devices.FaderSpec: how many slots to write, and which
+    sources a fader may take in each USB mode.
 
     THE CALLER MUST HOLD THE HID LOCK (this module does no locking). progress, if given, is called
     with a short human sentence at each section boundary, so a caller polling from a UI has
@@ -526,11 +529,17 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
     if prof.get("midi") is not None:
         rs.write("MIDI control", lambda: rcp_transfer.set_midi_control(bool(prof["midi"])))
     routing = prof.get("routing") or {}
-    # THE FADER LAYOUT GOES FIRST, and the levels straight after it, before any channel processing.
+    # THE USB MODE GOES BEFORE THE LAYOUT. Game, Music, A and B exist as fader sources only in
+    # Expanded, so a layout carrying them is refused by the fader gate until the desk is in that
+    # mode, and one written while the desk is still in Standard gives faders that carry nothing.
+    expanded = _restore_usb_mode(rs, routing)
+    if expanded is None:
+        expanded = channels.usb_expanded()
+    # THE FADER LAYOUT GOES NEXT, and the levels straight after it, before any channel processing.
     # Processing, effects and faderLevel are all addressed per fader STRIP (channels._strip_index),
     # so the layout decides where each of them has to be written. Written later, every restored
     # chain lands against the OLD layout and then has the layout moved out from under it.
-    _restore_layout(rs, routing, fader_count, fader_code_set)
+    _restore_layout(rs, routing, fader_spec, expanded)
     _restore_levels(rs, routing)
     _restore_channels(rs, prof.get("channels") or [])
     _restore_master(rs, routing)
@@ -539,16 +548,28 @@ def apply(prof, *, fader_count, fader_code_set, progress=None) -> dict:
     return rs.result()
 
 
-def _restore_layout(rs, routing, fader_count, fader_code_set):
+def _restore_layout(rs, routing, fader_spec, expanded):
     """The fader layout, on a device with the "fader_write" cap; refused, and the user told,
-    elsewhere."""
+    elsewhere.
+
+    The gate is `FaderSpec.code_set_for`, the same one a fader change made by hand passes, taken
+    for the mode the desk is in once `_restore_usb_mode` has run. A saved source it refuses (a
+    stereo-linked pair, or one of the Expanded four when the mode could not be set) is named in
+    the result rather than skipped unheard. An empty slot is left as it is."""
     faders = routing.get("faders") or []
     if "fader_write" in devices.get_active_device().caps:
         rs.step("Restoring the fader layout.")
-        for i, code in enumerate(faders):
-            if i < fader_count and code is not None and code in fader_code_set:
+        allowed = fader_spec.code_set_for(bool(expanded))
+        labels = fader_spec.labels_for(bool(expanded))
+        for i, code in enumerate(faders[:fader_spec.vector_length]):
+            if code is None or code == -1:
+                continue
+            if code in allowed:
                 rs.write(f"fader {i + 1}",
                          lambda i=i, code=code: rcp_transfer.set_fader_source(i, int(code)))
+            else:
+                rs.refuse(f"fader {i + 1}: {labels.get(code, f'source {code}')} cannot be "
+                          f"placed by a restore, not restored")
     elif any(c is not None for c in faders):
         rs.refuse("fader layout: changing faders is not enabled on this device, not restored")
 
@@ -712,10 +733,36 @@ _MASTER_OUT_KEYS = ("multitrack", "processing_bypass", "recording_format", "usb_
                     "compellor_release", "compellor_gain", "delay_on")
 
 
+def _restore_usb_mode(rs, r):
+    """What the desk sends this computer and Standard or Expanded, as ONE write. Returns whether
+    the desk is now in Expanded, or None when nothing was written (no saved mode, no
+    "output_write" cap, or the write failed), in which case the desk's mode is unchanged.
+
+    ONE WRITE FOR BOTH HALVES, because the desk keeps them in one property: two writes would take
+    two re-enumerations and let the second undo the first. It gets its own spoken step because it
+    re-enumerates the desk's USB audio function, so every RODECaster input and output on the
+    machine drops for a second or two. Without the cap, `_restore_master` reports it refused."""
+    if r.get("usb_multitrack") is None or "output_write" not in devices.get_active_device().caps:
+        return None
+    expanded = bool(r.get("usb_expanded"))
+
+    def usb_mode(mode):
+        rs.step("Setting what the desk sends this computer. Its audio devices will drop out "
+                "for a couple of seconds.")
+        rcp_transfer.set_usb_multitrack_mode(recorder.join_usb_multitrack(mode, expanded))
+
+    failed = rs.failed
+    if rs.choice("USB multitrack", r["usb_multitrack"], rcp_transfer.MULTITRACK_MODES,
+                 usb_mode) is None or rs.failed > failed:
+        return None
+    return expanded
+
+
 def _restore_master(rs, r):
     """The master and global output-block writes (multitrack, auto-mutes, headphone type,
-    Compellor, delay). Gated on the device's "output_write" cap, because an unmapped global
-    selector would append a stray: on a device without it they are refused, not written blind."""
+    Compellor, delay). The USB mode is in the same block but goes first, in `_restore_usb_mode`.
+    Gated on the device's "output_write" cap, because an unmapped global selector would append a
+    stray: on a device without it they are refused, not written blind."""
     if "output_write" not in devices.get_active_device().caps:
         if any(r.get(k) is not None for k in _MASTER_OUT_KEYS):
             rs.refuse("master output settings (multitrack, auto-mute, headphone, Compellor, "
@@ -734,17 +781,6 @@ def _restore_master(rs, r):
     if r.get("recording_format") is not None:
         rs.choice("recording format", r["recording_format"], rcp_transfer.RECORDING_FORMATS,
                   rcp_transfer.set_recording_format)
-    # THE USB MODE GETS ITS OWN SPOKEN STEP: it re-enumerates the desk's USB audio function, so
-    # every RODECaster input and output on the machine drops for a second or two. ONE WRITE FOR
-    # BOTH HALVES, because the desk keeps them in one property: two writes would take two
-    # re-enumerations and let the second undo the first.
-    if r.get("usb_multitrack") is not None:
-        def usb_mode(mode):
-            rs.step("Setting what the desk sends this computer. Its audio devices will drop out "
-                    "for a couple of seconds.")
-            rcp_transfer.set_usb_multitrack_mode(
-                recorder.join_usb_multitrack(mode, r.get("usb_expanded")))
-        rs.choice("USB multitrack", r["usb_multitrack"], rcp_transfer.MULTITRACK_MODES, usb_mode)
     if r.get("usb_processing_bypass") is not None:
         rs.write("raw USB multitrack", lambda v=r["usb_processing_bypass"]:
                  rcp_transfer.set_usb_multitrack_bypass(bool(v)))

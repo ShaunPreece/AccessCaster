@@ -1050,8 +1050,12 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   operator's control. Asserted both ways by a test. RODE's own app behaves the same.
 - **`faderLevel` is addressed per STRIP.** Written before the layout it lands on whatever channel was
   there before, so restore writes levels straight AFTER the layout.
-- **`profiles.apply` restores THE FADER LAYOUT FIRST**, before channel processing. It used to be
-  last, so a profile saved with a reordered layout restored its voicings onto the wrong channels.
+- **`profiles.apply` restores THE USB MODE, THEN THE FADER LAYOUT, before channel processing.**
+  Processing lands per strip, so a layout written after it restores voicings onto the wrong
+  channels. The USB mode goes before the layout because Game, Music, A and B are fader sources only
+  in Expanded: the layout is gated with `FaderSpec.code_set_for` in the mode just set, and a source
+  it refuses is named in the result. Nothing outside `devices.py` gates on the Standard-only
+  `code_set` / `code_order`; `test_profiles.py` checks that.
 - **CHOOSING A MIC VOICING ALSO REPLACES THE WHOLE PROCESSING CHAIN, and writing the old type back
   does NOT undo it.** Measured on a Pro II 31st August 2026: PodMic -> Dynamic moved 13 params
   (Depth, Sparkle, Punch, compressor threshold + gain, de-esser, gate threshold + range, all three EQ
@@ -1205,7 +1209,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   (2nd September 2026) rather than fixed, because three of its four callers had the bug and the
   fourth was one link away from it: the announcer said "0 percent, Source 4" out loud for a linked
   Mic 1 + 2, which Shaun heard while the live caps suite was linking them. **Naming is the WIDE set
-  (`all_labels`), writing is the NARROW one (`code_set` / `code_order`)** - and they must stay apart,
+  (`all_labels`), writing is the NARROW one (`code_set_for` / `code_order_for`)** - and they must stay apart,
   because a pair code in `assignable` would let the UI offer "Mic 1 + 2" as a drop target and let
   `_tidy_fader_target` gap-fill with it. Pinned by `test_announcer.py`.
 - **`channelWirelessMute` IS IN THE CHANNEL BLOCK, PER STRIP, NOT IN THE INPUT TABLE.** It sits on

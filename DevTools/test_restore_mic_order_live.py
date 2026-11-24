@@ -71,8 +71,7 @@ def main() -> int:
                               "instrument_gain": int(before["inputInstrumentGain"]),
                               "advanced": advanced_before,
                               "params": {CHAIN_PROP: WANT_CHAIN}}]}
-        res = profiles.apply(prof, fader_count=devices.PRO2.fader.vector_length,
-                                 fader_code_set=devices.PRO2.fader.code_set)
+        res = profiles.apply(prof, fader_spec=devices.PRO2.fader)
         print(f"   {res['applied']} writes, {res['failed']} failed {res['errs']}")
         time.sleep(SETTLE)
         after = read_input(slot)
