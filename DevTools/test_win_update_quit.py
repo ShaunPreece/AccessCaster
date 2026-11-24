@@ -9,7 +9,7 @@ window, a frame and the real `JobDialog` in that state, and the real exit: the c
 child ends, with code 0, in time, with the service stopped. The cases with a dialog whose `EndModal`
 fails are the stall a 3.0.0 update hit.
 
-    python DevTools/test_native_update_quit.py
+    python DevTools/test_win_update_quit.py
 """
 from __future__ import annotations
 
@@ -54,17 +54,17 @@ def child(case: str) -> None:
     loop = wx.GUIEventLoop()
     tray_app = tray.TrayApp.__new__(tray.TrayApp)     # the real quit path, without the service
     tray_app.app, tray_app.loop = app, loop
-    tray_app.hwnd, tray_app.frame = None, None
+    tray_app.frame = None
     tray_app._ui_thread = threading.get_ident()
     tray_app._starting = False
     tray_app._quitting = False
     tray_app._ended = False
     tray_app._window_gone = False
-    tray_app._add_icon = tray_app._remove_icon = lambda: None
-    tray_app._create_window()
+    tray_app.icon = tray.Icon(tray_app)
+    tray_app.icon.add = tray_app.icon.remove = lambda: None
     tray_app.frame = wx.Frame(None, title="AccessCaster")
     app.Bind(wx.EVT_QUERY_END_SESSION, lambda event: None)
-    app.Bind(wx.EVT_END_SESSION, lambda event: tray_app._end_now("Windows is closing the app"))
+    app.Bind(wx.EVT_END_SESSION, lambda event: tray_app._end_now(tray._SESSION_ENDING))
 
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     user32.GetThreadDesktop.restype = wintypes.HANDLE

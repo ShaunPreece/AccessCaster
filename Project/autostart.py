@@ -21,6 +21,8 @@ from __future__ import annotations
 import os
 import sys
 
+from wording import TRAY
+
 if sys.platform == "win32":
     from win.autostart import command_for, current, install, remove
 else:
@@ -78,7 +80,7 @@ def state() -> dict:
                 "message": (f"AccessCaster starts when you sign in, but from a different copy: "
                             f"{value}. Switching this off and on again points it at this one.")}
     return {"enabled": True, "supported": True, "value": value,
-            "message": "AccessCaster starts when you sign in, in the system tray."}
+            "message": f"AccessCaster starts when you sign in, in {TRAY}."}
 
 
 def set_enabled(on: bool) -> dict:
@@ -99,7 +101,7 @@ def set_enabled(on: bool) -> dict:
         return {"ok": False, "enabled": current() is not None,
                 "message": f"Could not change the startup setting: {exc}"}
     return {"ok": True, "enabled": bool(on),
-            "message": ("AccessCaster will start when you sign in, in the system tray. It does not "
-                        "open its window: use the tray icon, or your shortcut keys, which work as "
+            "message": (f"AccessCaster will start when you sign in, in {TRAY}. It does not open "
+                        f"its window: use its icon in {TRAY}, or your shortcut keys, which work as "
                         "soon as it is running." if on else
                         "AccessCaster will no longer start when you sign in.")}

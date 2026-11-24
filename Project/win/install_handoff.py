@@ -1,7 +1,7 @@
 """Windows' `install_handoff`: Setup run silently, and Restart Manager bringing the app back.
 
 ACCESSCASTER DOES NOT EXIT ITSELF TO INSTALL. Setup's Restart Manager asks the running app to close
-(`tray.py` answers WM_QUERYENDSESSION and WM_ENDSESSION for it), and /RESTARTAPPLICATIONS brings
+(`win/tray.py` answers WM_QUERYENDSESSION and WM_ENDSESSION for it), and /RESTARTAPPLICATIONS brings
 back a process registered with `RegisterApplicationRestart`. Exiting first would leave Restart
 Manager nothing to restart, so AccessCaster would install and never come back.
 

@@ -1870,7 +1870,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   process alive, so Setup could not replace it. Quit itself gives the dialogs
   `DIALOGS_END_WITHIN_S`, then ends the process the same way. **`installer.iss` has
   `CloseApplications=force`**, so a copy that still does not close (3.0.0 among them) is ended by
-  Setup rather than left for the user to answer an error. `test_native_update_quit` runs each
+  Setup rather than left for the user to answer an error. `test_win_update_quit` runs each
   case in a child process with the real exit.
 - **`/VERYSILENT`, never `/SILENT`**: under `/SILENT` Setup's progress window takes focus on its
   Cancel button and a Space cancels the install. **And the installer must not prompt during a
@@ -1888,7 +1888,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 
 - **THE TRAY ICON IS ADDED AGAIN ON `TaskbarCreated`** (`tray.TrayApp._on_taskbar_created`). Explorer's
   restart removes every notification icon, and without it the app runs on with Quit and its menu
-  out of reach. `test_tray_icon` checks it.
+  out of reach. `test_win_tray` checks it.
 - **THE WINDOW BELONGS TO THE TRAY, AND CLOSING IT HIDES IT** (`MainFrame._on_close` vetoes; only
   Quit's `Close(force=True)` destroys it). It is built the first time it is wanted, never at
   sign-in. On close the window hides BEFORE its page, so Windows records the focused control as it

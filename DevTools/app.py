@@ -29,8 +29,8 @@ import win32con
 import win32event
 import win32gui
 import win32process
+from win.tray import TRAY_CLASS
 
-TRAY_CLASS = "AccessCasterTray"     # tray.TRAY_CLASS; tray itself is not imported, it loads wx
 STARTUP_FLAG = "--startup"          # autostart.STARTUP_FLAG
 QUIT_WAIT_S = 20.0
 START_WAIT_S = 20.0

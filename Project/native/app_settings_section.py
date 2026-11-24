@@ -23,6 +23,7 @@ from native.dialogs import confirm, report
 from native.pages import AFTER_FOCUS_MS, Page, add_button, gap, page_body, read_only, set_text
 from native.shortcuts_page import ShortcutsPage
 from native.update_dialogs import decide
+from wording import OS_NAME, TRAY
 
 TITLE = "App settings"
 CHECKING_AFTER_MS = 500
@@ -175,7 +176,7 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
 
 
 class GeneralPage(wx.Panel):
-    """Starting with Windows, keeping running in the tray, and saving this app's settings to a
+    """Starting at sign-in, keeping running in the tray, and saving this app's settings to a
     file or restoring them."""
 
     def __init__(self, section):
@@ -186,12 +187,12 @@ class GeneralPage(wx.Panel):
         self.data = None             # the last `app_settings_actions.read_general`
         sizer, parent = page_body(self)
         self.autostart = Switch(self, parent, sizer,
-                                "Start AccessCaster when you sign in to Windows",
+                                f"Start AccessCaster when you sign in to {OS_NAME}",
                                 app_settings_actions.action_set_autostart,
                                 lambda: (self.data or {}).get("enabled"), lambda _on: None,
                                 guard=self._autostart_refused, accepted=lambda _r: self.read())
         self.keep_in_tray = Switch(
-            self, parent, sizer, "Keep running in the system tray when the window is closed",
+            self, parent, sizer, f"Keep running in {TRAY} when the window is closed",
             app_settings_actions.action_set_keep_in_tray,
             *record_field(lambda: self.data, "keep_in_tray"),
             description="Your keyboard shortcuts and spoken announcements only work while "
@@ -221,7 +222,7 @@ class GeneralPage(wx.Panel):
         def done(reply):
             self.data = reply
             self.autostart.acc.description = reply.get("message") or (
-                "It starts in the system tray, so your shortcuts work from the moment you sign "
+                f"It starts in {TRAY}, so your shortcuts work from the moment you sign "
                 "in.")
             self.autostart.show()
             self.keep_in_tray.show()

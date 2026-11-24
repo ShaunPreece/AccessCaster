@@ -174,10 +174,10 @@ def keep_in_tray() -> bool:
 
 def action_set_keep_in_tray(on: bool) -> dict:
     if on is None:
-        return {"ok": False, "message": "Say whether to keep running in the tray or not."}
+        return {"ok": False, "message": f"Say whether to keep running in {wording.TRAY} or not."}
     settings_file.update(keep_in_tray=bool(on))
     return {"ok": True, "keep_in_tray": bool(on),
-            "message": ("Closing the window will leave AccessCaster running in the tray." if on
+            "message": (f"Closing the window will leave AccessCaster running in {wording.TRAY}." if on
                         else "Closing the window will quit AccessCaster.")}
 
 
