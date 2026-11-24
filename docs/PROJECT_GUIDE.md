@@ -1862,7 +1862,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   installer cuts the sentence off. No `proceed` within `PROCEED_WITHIN_S` installs nothing.
 - **THE APP DOES NOT EXIT ITSELF TO INSTALL.** Setup's Restart Manager closes it (the tray answers
   WM_QUERYENDSESSION and WM_ENDSESSION) and `/RESTARTAPPLICATIONS` brings it back with `--updated`,
-  registered by `restart.register` just before. The restart opens the window, which the install
+  registered by `win/install_handoff.register_restart` just before. The restart opens the window, which the install
   closed, and App settings there takes the update's report.
 - **A SESSION END ENDS THE PROCESS AT ONCE** (`TrayApp._end_now`: the service stopped, then
   `os._exit`). It never goes through Quit's dialog unwinding: the update's own dialog is always

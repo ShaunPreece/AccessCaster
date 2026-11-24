@@ -28,15 +28,15 @@ from __future__ import annotations
 import datetime
 import os
 import shutil
-import subprocess
 import sys
 import threading
 import time
 
+import install_handoff
 import paths
 import settings_file
 from selfupdate import check as checks
-from selfupdate import checker, downloader, interval, phrases, restart, signing
+from selfupdate import checker, downloader, interval, phrases, signing
 from selfupdate.versions import UpdateVersion
 from version import __version__
 
@@ -67,18 +67,6 @@ NOT_BACK_WITHIN_S = 180
 # How long a report from the far side of a restart waits for the window to take it before it is
 # raised as a notification instead. The restart opens the window, which takes it within seconds.
 REPORT_WAIT_S = 30
-
-# /VERYSILENT rather than /SILENT: under /SILENT Setup's progress window takes focus on its Cancel
-# button, JAWS reads nothing from its bar, and a Space pressed into the wait cancels the install.
-# /SUPPRESSMSGBOXES is deliberately NOT given: a Setup message box still shows under /VERYSILENT,
-# and an error the user can read and answer beats one that is swallowed. /RESTARTAPPLICATIONS
-# brings back the process `restart.register` registered; /NORESTART because nothing here justifies
-# rebooting the machine.
-INSTALLER_ARGS = ["/VERYSILENT", "/RESTARTAPPLICATIONS", "/NORESTART"]
-
-# Detached, so the installer outlives the process that started it: Restart Manager is about to
-# close this one.
-_DETACHED = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
 
 # Said after the shared `phrases.settings_status`, because the firmware check is this app's alone.
 FIRMWARE_TOO = " The same schedule checks the connected desk's firmware."
@@ -438,9 +426,7 @@ def proceed() -> dict:
     """The dialog has taken its controls away and the closing sentence has been read: start the
     installer and leave it to close the app.
 
-    THE APP DOES NOT EXIT ITSELF HERE. The installer's Restart Manager asks it to close, and
-    /RESTARTAPPLICATIONS brings back the process registered in `restart`. Exiting first would leave
-    Restart Manager nothing to restart, so the app would install and never come back."""
+    The app does not exit itself here: the installer closes it (`install_handoff`)."""
     with _lock:
         job = _job
         if job is None or job.stage != READY or job.cancel.is_set():
@@ -449,14 +435,11 @@ def proceed() -> dict:
     installer = job.installer
     # Recorded BEFORE the installer starts, because this process will be gone before it finishes.
     settings_file.update(**{_INSTALLING_KEY: f"{job.offer.version}|{installer}"})
-    restart.register()
     try:
-        subprocess.Popen([installer] + INSTALLER_ARGS, cwd=os.path.dirname(installer),
-                         creationflags=_DETACHED, close_fds=True)
+        install_handoff.start(installer)
     except OSError as exc:
         checker.log(f"could not start {installer}: {exc}")
         settings_file.update(**{_INSTALLING_KEY: ""})
-        restart.unregister()
         _forget_the_offer()
         with _lock:
             job.stage = FAILED

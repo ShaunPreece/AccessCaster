@@ -1,100 +1,22 @@
 """The app's own window, as code outside the window asks for it (the Open AccessCaster shortcut).
 
 `tray.py` hosts the window and installs `show` here; a DevTools run has no window, and `show`
-stays None. `raise_window` brings a window to the front with a real activation.
+stays None.
+
+The platform supplies `raise_window(handle)`: restore the native window `handle` if minimised and
+bring it to the front with a real activation, the kind a screen reader follows, from any thread.
+Returns whether the system made it the foreground window; logs the outcome as `window.raise`.
 """
+import sys
 
-import os
-import time
-
-import diagnostics
-
-# How long `raise_window` waits for the foreground switch to finish before judging it.
-_SETTLE_S = 0.5
+if sys.platform == "win32":
+    from win.app_window import raise_window
+else:
+    raise ImportError(f"No window raise for {sys.platform}: the Windows one is win/app_window.py")
 
 # show() -> bool | None, callable from any thread: shows the window, creating it if need be, and
-# returns whether Windows made it the foreground window, or None while the app is closing, when
+# returns whether the system made it the foreground window, or None while the app is closing, when
 # there is no window to show.
 show = None
 
-
-def raise_window(hwnd: int) -> bool:
-    """Restore `hwnd` if minimised and bring it to the foreground, from any thread. Returns whether
-    Windows made it the foreground window. Logs the outcome as `window.raise`."""
-    if os.name != "nt":
-        return False
-    import ctypes
-    from ctypes import wintypes
-    user32 = ctypes.windll.user32
-    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
-    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-    user32.IsIconic.argtypes = [wintypes.HWND]
-    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
-    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
-    user32.SetForegroundWindow.restype = wintypes.BOOL
-    # Declared: an undeclared restype is a C int, which TRUNCATES a 64-bit HWND and would make the
-    # success check below compare two different halves of the same window.
-    user32.GetForegroundWindow.argtypes = []
-    user32.GetForegroundWindow.restype = wintypes.HWND
-    SW_RESTORE = 9
-    if user32.IsIconic(hwnd):
-        user32.ShowWindow(hwnd, SW_RESTORE)
-
-    # A PLAIN SetForegroundWindow, AND NOTHING ELSE. Windows grants this process the right to set
-    # the foreground while the hotkey it registered is being handled, so the call is allowed and
-    # produces a NORMAL activation - which is the whole point, because a normal activation is what
-    # tells a screen reader the window came forward.
-    #
-    # DO NOT ADD A WORKAROUND HERE IF IT FAILS. Every one of them - a minimize/restore flip, an
-    # Alt tap, AttachThreadInput - puts the window in front WITHOUT a real activation: the window
-    # holds the foreground and the keyboard focus (GetGUIThreadInfo agrees), and the screen reader
-    # goes on reading the app the user came from, while Alt+Tab to the same window is announced
-    # normally. A refusal here means the CALLER has lost the foreground right, and the fix is at
-    # that end: see hotkeys._FOREGROUND_COMMANDS, whose commands run on the hotkey thread because
-    # a hop to a worker thread spends the right.
-    user32.SetForegroundWindow(hwnd)
-    # ASK WINDOWS WHAT HAPPENED RATHER THAN ASSUMING IT WORKED: the caller stays silent on a
-    # success, so a refusal reported as success would be silent too. The switch can still be under
-    # way when SetForegroundWindow returns, with no foreground window at all, so the answer is
-    # waited for: a refusal leaves the old window in front at once, a switch ends on this one.
-    started = time.monotonic()
-    got = user32.GetForegroundWindow()
-    while got != hwnd and time.monotonic() - started < _SETTLE_S:
-        time.sleep(0.02)
-        got = user32.GetForegroundWindow()
-    waited_ms = round((time.monotonic() - started) * 1000)
-    ok = bool(got) and got == hwnd
-    # LOG THE FOCUS WINDOW, NOT JUST THE FOREGROUND ONE. They are different things and only the
-    # second is what a screen reader follows, so "the window came up but my screen reader still
-    # says I am in the other app" has two possible causes that look identical from outside: a
-    # window that is merely in front without holding focus, or a screen reader reporting a stale
-    # object because nothing generated a focus event. This one line separates them.
-    # GetGUIThreadInfo(0) reports the foreground thread's own focus window.
-    try:
-        class _GTI(ctypes.Structure):
-            _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD),
-                        ("hwndActive", wintypes.HWND), ("hwndFocus", wintypes.HWND),
-                        ("hwndCapture", wintypes.HWND), ("hwndMenuOwner", wintypes.HWND),
-                        ("hwndMoveSize", wintypes.HWND), ("hwndCaret", wintypes.HWND),
-                        ("rcCaret", wintypes.RECT)]
-        gti = _GTI()
-        gti.cbSize = ctypes.sizeof(_GTI)
-        user32.GetGUIThreadInfo.argtypes = [wintypes.DWORD, ctypes.POINTER(_GTI)]
-        user32.GetGUIThreadInfo(0, ctypes.byref(gti))
-
-        def _title(h):
-            if not h:
-                return "none"
-            n = user32.GetWindowTextLengthW(h)
-            b = ctypes.create_unicode_buffer(n + 1)
-            user32.GetWindowTextW(h, b, n + 1)
-            return (b.value or "")[:40]
-
-        diagnostics.event("window.raise", "app window", activated=ok, waited_ms=waited_ms,
-                          wanted=f"{hwnd}", foreground=f"{got}",
-                          fg_title=_title(got),
-                          active=f"{gti.hwndActive}", active_title=_title(gti.hwndActive),
-                          focus=f"{gti.hwndFocus}", focus_title=_title(gti.hwndFocus))
-    except Exception as exc:
-        diagnostics.event("window.raise", "app window", activated=ok, error=f"{exc}")
-    return ok
+__all__ = ["raise_window", "show"]

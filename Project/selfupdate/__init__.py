@@ -24,11 +24,10 @@ What goes where:
   interval.py   how often to look, including never
   checker.py    fetch, verify, then parse, in that order
   downloader.py the installer download and the proof it is the right file
-  restart.py    being started again by the installer
   phrases.py    every sentence the feature says
 
 The requests go through `web.opened`, beside this package, with the app's own User-Agent.
 
-When to ask, how to tell the user, and the hand-off to the installer are
-`app_updates.py`, beside this package.
+When to ask and how to tell the user are `app_updates.py`, and the hand-off
+to the installer is `install_handoff.py`, both beside this package.
 """

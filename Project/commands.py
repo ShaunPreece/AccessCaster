@@ -278,8 +278,8 @@ def _say_state() -> dict:
 def _open_window() -> dict:
     """Bring the app's own window up. The one shortcut that is not about the desk: it is how you get
     to everything that is deliberately NOT on a hotkey."""
-    # SILENT ON SUCCESS: Windows announces the raised window and its focused control, so speaking
-    # here would talk over the screen reader in a second voice. A real activation is
+    # SILENT ON SUCCESS: the screen reader announces the raised window and its focused control, so
+    # speaking here would talk over it in a second voice. A real activation is
     # `app_window.raise_window`'s problem and is documented there.
     if app_window.show is None:
         return _said("")

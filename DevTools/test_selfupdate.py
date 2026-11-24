@@ -31,7 +31,7 @@ from _testkit import check, check_true, patched
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from selfupdate import check as checks
-from selfupdate import checker, downloader, indexfile, interval, phrases, restart, signing
+from selfupdate import checker, downloader, indexfile, interval, phrases, signing
 from selfupdate.versions import UpdateVersion
 from version import HISTORY, __version__
 
@@ -283,7 +283,6 @@ def wait_for(stage, within=3.0):
 offered = offer_of()
 found = checks.CheckResult(checks.AVAILABLE, offered)
 launched = []
-registered = []
 
 
 def fake_download(offer, folder, open_url=None, watcher=None):
@@ -294,8 +293,7 @@ def fake_download(offer, folder, open_url=None, watcher=None):
 with patched((checker, {"run": lambda running, skipped: found}),
              (signing, {"is_configured": lambda key=None: True}),
              (downloader, {"download": fake_download}),
-             (app_updates.subprocess, {"Popen": lambda *a, **k: launched.append((a, k))}),
-             (restart, {"register": lambda: registered.append(True) or True})):
+             (app_updates.install_handoff, {"start": launched.append})):
     reset()
     reply = app_updates.check_now()
     offer = reply.get("offer") or {}
@@ -308,10 +306,8 @@ with patched((checker, {"run": lambda running, skipped: found}),
     check("the job reaches ready", (wait_for("ready") or {}).get("stage"), "ready")
     check("nothing is launched until the window says proceed", launched, [])
     check("proceed starts the installer", app_updates.proceed()["ok"], True)
-    args = launched[0][0][0] if launched else []
-    check("silently, restarting the app, never rebooting", args[1:],
-          ["/VERYSILENT", "/RESTARTAPPLICATIONS", "/NORESTART"])
-    check_true("the restart is registered before the hand-off", registered)
+    check_true("with the downloaded installer", len(launched) == 1 and launched[0].endswith(
+        downloader.file_name_for("2.64.0")))
     check_true("and the next launch is told what to look for",
                settings_file.load().get(app_updates._INSTALLING_KEY, "").startswith("2.64.0|"))
 
@@ -368,8 +364,7 @@ app_updates.request_decision()
 check("the tray's request is taken once", (app_updates.take_request(), app_updates.take_request()),
       (True, False))
 
-print("\nTHE RESTART AND THE INSTALLER")
-check("a source run never registers a restart", restart.register(), False)
+print("\nTHE INSTALLER")
 iss = (REPO / "ProjectBuilds" / "installer.iss").read_text(encoding="utf-8")
 check_true("a silent update never touches the firewall rule, which would raise UAC",
            "not WizardSilent and FirewallRuleAdded" in iss)
