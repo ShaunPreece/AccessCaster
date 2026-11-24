@@ -166,6 +166,7 @@ class Slider:
         if text.GetLabel() != label:
             text.SetLabel(label)
             self.slider.SetLabel(label)
+            a11y.relabel(self.slider, label)
 
     def _on_slider(self, _event):
         self._moved_at = time.monotonic()

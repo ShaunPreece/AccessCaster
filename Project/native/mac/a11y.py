@@ -8,15 +8,20 @@ the native checkbox, list or slider it is.
 
 A value description does not ask the app each time it is read, so `describe`'s `value` is read
 again whenever the control takes the focus, and a slider's whenever it moves (`changed`).
+
+VoiceOver does not name a control from the text before it, as Windows does, so `follow_labels`
+gives each control that label (`native.labels`) whenever a window or page is shown. A show reaches
+the app's handler when the window's own handlers let it pass, as they all do. `relabel` names one
+control again after its label changes.
 """
 import wx
 
-from mac.cocoa import ns_object
+from mac.cocoa import focus_view
 
 
 class _Accessible:
     def __init__(self, window, description, value):
-        self._view = ns_object(window.GetHandle())
+        self._view = focus_view(window.GetHandle())
         self._value = value
         self.description = description
         # Not read here: a slider's words read the control, which is still being built.
@@ -47,3 +52,37 @@ def describe(window, description="", value=None):
 
 def slider(window, words, description=""):
     return _Accessible(window, description, words)
+
+
+def follow_labels(app):
+    app.Bind(wx.EVT_SHOW, _shown)
+
+
+def relabel(window, text):
+    _name(window, text)
+
+
+def _shown(event):
+    event.Skip()
+    window = event.GetEventObject()
+    if event.IsShown() and isinstance(window, wx.Window):
+        _name_inside(window)
+
+
+def _name_inside(window):
+    from native import labels
+    for child in window.GetChildren():
+        if isinstance(child, labels.NAMED_BY_LABEL):
+            text = labels.label_before(child)
+            if text:
+                _name(child, text)
+        elif not isinstance(child, labels.SELF_NAMED):
+            _name_inside(child)
+
+
+def _name(window, text):
+    """The control, and whatever it is built from that takes the focus."""
+    focus_view(window.GetHandle()).setAccessibilityLabel_(text)
+    for part in window.GetChildren():
+        if part.AcceptsFocus():
+            focus_view(part.GetHandle()).setAccessibilityLabel_(text)

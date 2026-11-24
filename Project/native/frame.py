@@ -21,7 +21,7 @@ import app_settings_actions
 import device_page
 import rode_app
 import rode_follow
-from native import announce
+from native import a11y, announce
 from native.app_settings_section import AppSettingsSection
 from native.backups_section import BackupsSection
 from native.callme_section import CallMeSection
@@ -61,6 +61,7 @@ class MainFrame(Speaker, wx.Frame):
         super().__init__(None, title=APP_TITLE,
                          size=wx.Window.FromDIP(wx.Size(980, 680), None))
         self._quit_app = quit_app
+        a11y.follow_labels(wx.GetApp())
         root = wx.Panel(self)
         # A static text created just before a control names it, the standard Win32 labelling.
         tree_label = wx.StaticText(root, label="Categories")

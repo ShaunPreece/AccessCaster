@@ -10,7 +10,8 @@ is built to (`native.pages`, and PROJECT_GUIDE part 2, Native window):
 
   * A control a screen reader names from the text before it (a text box, list, slider, number box)
     has a non-empty static label as its previous sibling: Windows takes the name from the static
-    text created just before it, which is what `pages.labelled` does.
+    text created just before it, which is what `pages.labelled` does, and on a Mac
+    `a11y.follow_labels` hands that name to VoiceOver (`native.labels`).
   * A button, checkbox or radio button has a label of its own, and a group box a title.
   * A read-only text box is multi-line: wx never makes a single-line one a tab stop, so Tab passes a
     reading by.
@@ -21,17 +22,9 @@ for a pass by hand.
 from __future__ import annotations
 
 import wx
-import wx.dataview as dv
 from _testkit import check
-from native.slider import SliderCtrl
-
-NAMED_BY_LABEL = (wx.TextCtrl, wx.Choice, wx.ComboBox, wx.ListBox, SliderCtrl, wx.SpinCtrl,
-                  wx.SpinCtrlDouble, wx.ListCtrl, wx.TreeCtrl, dv.DataViewCtrl)
-SELF_NAMED = (wx.Button, wx.CheckBox, wx.RadioButton, wx.ToggleButton)
-
-
-def _text(label: str) -> str:
-    return label.replace("&", "").strip()
+from native.labels import NAMED_BY_LABEL, SELF_NAMED
+from native.labels import text_of as _text
 
 
 def _name(window) -> str:
@@ -64,9 +57,12 @@ def problems(window) -> list:
 
 
 def _walk(window):
+    """Every window that holds controls. A named control is whole: what it is built from inside is
+    not walked (`native.labels`)."""
     yield window
     for child in window.GetChildren():
-        yield from _walk(child)
+        if not isinstance(child, NAMED_BY_LABEL + SELF_NAMED):
+            yield from _walk(child)
 
 
 def check_tree(window, where: str) -> bool:

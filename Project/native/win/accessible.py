@@ -30,3 +30,11 @@ def describe(window, description="", value=None):
     window.SetAccessible(acc)
     return acc
 
+
+
+def follow_labels(app):
+    """Windows names a control from the static text before it on its own."""
+
+
+def relabel(window, text):
+    """Windows reads the renamed static text itself."""

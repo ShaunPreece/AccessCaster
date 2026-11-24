@@ -22,6 +22,7 @@ from _native_fakes import FakeFrame
 from _testkit import check, check_in, check_true, patched
 from native import app_settings_section, help_section, shortcuts_page
 from version import __version__
+from wording import OS_NAME
 
 app = wx.App()
 
@@ -120,13 +121,13 @@ check("each switch shows its setting", [s.box.GetValue() for s in announcements.
 check("recording's sound is a choice of three, showing the setting",
       (announcements.record_feedback.control.GetCount(),
        announcements.record_feedback.control.GetStringSelection()), (3, "Play a tone"))
-check("the voices are Windows' own, after the default",
+check("the voices are the system's own, after the default",
       [announcements.voice.control.GetString(i)
        for i in range(announcements.voice.control.GetCount())],
-      ["Windows default voice", "David", "Zira"])
+      [f"{OS_NAME} default voice", "David", "Zira"])
 check("the chosen voice is selected", announcements.voice.control.GetSelection(), 2)
 check("no outputs refuses a choice and says why", announcements._no_choice("outputs"),
-      "Windows reported no outputs to this computer, so there is nothing to choose.")
+      f"{OS_NAME} reported no outputs to this computer, so there is nothing to choose.")
 check("the volume is read in percent", announcements.volume._value_words(), "60 percent")
 
 # ---- the report after an update --------------------------------------------------------------
