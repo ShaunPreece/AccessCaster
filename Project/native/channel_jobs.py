@@ -12,6 +12,7 @@ from native import a11y
 from native.calls import call
 from native.dialogs import JobDialog, TextDialog
 from native.pages import gap
+from wording import OS_NAME
 
 
 def countdown_words(left):
@@ -45,8 +46,8 @@ class AutoGain:
             f"{int(autogain_actions.VERIFY_S)} seconds more so it can check its work. Each take "
             "starts at a tone.\n\n"
             f"This switches {self.label} processing off while it listens and puts it back "
-            "afterwards, sets the Windows recording level to no change, and rewrites the gain. The "
-            "gain can be undone at the end.\n\n"
+            f"afterwards, sets the {OS_NAME} recording level to no change, and rewrites the gain. "
+            "The gain can be undone at the end.\n\n"
             "While it runs, press Escape or Enter to cancel at any time. The gain is then left as "
             "it was.",
             [(wx.ID_OK, "Start"), (wx.ID_CANCEL, "Cancel")],
@@ -152,7 +153,7 @@ class LevelCheck:
             self._ends.Stop()
             self._ends = None
         if self.running:
-            # Only a Windows mute or level the check had to clear: the start itself is a tone.
+            # Only a system mute or level the check had to clear: the start itself is a tone.
             if reply.get("message"):
                 self.frame.say(reply["message"])
             # `level_check` ends the run on its own timer and speaks the summary itself.

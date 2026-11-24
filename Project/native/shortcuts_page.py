@@ -7,6 +7,7 @@ page shows that.
 """
 import wx
 
+import hotkeys
 import shortcuts
 from native import a11y
 from native.calls import call
@@ -14,6 +15,7 @@ from native.dialogs import FormDialog, paragraphs, confirm
 from native.pages import (AFTER_FOCUS_MS, add_button, dip, gap, labelled, page_body, reply_text,
                           select, set_items)
 from native.controls import Switch, set_choices
+from wording import OS_NAME
 
 LIST_HINT = ("Press Enter to edit a shortcut, Delete to delete it, or the Applications key for "
              "more options.")
@@ -64,10 +66,11 @@ class ShortcutsPage(wx.Panel):
         self.enabled = Switch(
             self, parent, sizer, "Use keyboard shortcuts", shortcuts.action_set_enabled,
             lambda: (self.state or {}).get("enabled"), lambda _on: None,
-            description="These work anywhere in Windows, whatever program you are in and even "
-                        "with this window closed, for as long as AccessCaster is running. Each "
-                        "one needs Ctrl, Alt or Windows in it, so it cannot take a plain key away "
-                        "from your screen reader. Turning this off releases every combination.",
+            description=f"These work anywhere in {OS_NAME}, whatever program you are in and "
+                        "even with this window closed, for as long as AccessCaster is running. "
+                        f"Each one needs {hotkeys.STRONG_WORDS} in it, so it cannot take a plain "
+                        "key away from your screen reader. Turning this off releases every "
+                        "combination.",
             guard=self._unread, accepted=lambda reply: self.show(reply.get("state")))
         self.list = labelled(parent, sizer, "Your shortcuts", lambda p: wx.ListBox(
             p, choices=["Reading the shortcuts."], size=dip(p, 460, 220)))

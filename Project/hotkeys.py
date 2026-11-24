@@ -69,6 +69,8 @@ _MOD_FLAG = {name: flag for name, _label, flag in MODIFIERS}
 # A modifier that is enough ON ITS OWN to make a combination safe to take from the whole system.
 # Shift is not in here on purpose: Shift+A is a capital A.
 _STRONG_MODS = ("ctrl", "alt", "win")
+# "Ctrl, Alt or Windows": a shortcut needs one of these.
+STRONG_WORDS = join_or([label for name, label, _flag in MODIFIERS if name in _STRONG_MODS])
 
 # THE HOUSE CHORD. Every shipped shortcut is on it and every new one starts on it. ONE CHORD FOR
 # THE WHOLE APP: two chords is one too many, so there is one thing to hold down and the only
@@ -149,8 +151,7 @@ def parse_binding(mods, key: str):
     if key not in _KEY_CODE:
         return 0, 0, tidy, f"{key or 'That'} is not a key this app can use for a shortcut."
     if not any(m in tidy for m in _STRONG_MODS):
-        strong = [label for name, label, _flag in MODIFIERS if name in _STRONG_MODS]
-        return 0, 0, tidy, (f"A shortcut needs {join_or(strong)} in it. Without one of those it "
+        return 0, 0, tidy, (f"A shortcut needs {STRONG_WORDS} in it. Without one of those it "
                             "would take that key away from every other program on this computer, "
                             "including your screen reader.")
     flags = 0

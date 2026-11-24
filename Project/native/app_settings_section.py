@@ -1,5 +1,5 @@
 """App settings: everything about AccessCaster itself rather than the unit. Announcements, keyboard
-shortcuts, starting with Windows and moving the settings, and updates.
+shortcuts, starting at sign-in and moving the settings, and updates.
 
 None of these reads the desk (bar the shortcut catalogue, read when Add is pressed), so the section
 reads every page when the service is up and on F5, and a page after any write whose reply does not
@@ -107,13 +107,13 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
                         "setting or a delay: that value, such as -20 decibels, the percent along "
                         "the slider's travel, or both.",
             guard=self._unread)
-        self.voice = Choice(self, parent, sizer, "Announcement voice", [("", "Windows default voice")],
+        self.voice = Choice(self, parent, sizer, "Announcement voice", [("", f"{OS_NAME} default voice")],
                             speech.action_set_announce_voice, *self.field("voice"),
                             description="Choosing one plays a sample. Your screen reader keeps "
                                         "its own voice.",
                             guard=lambda: self._no_choice("voices"))
         self.output = Choice(self, parent, sizer, "Where announcements play",
-                             [("", "Windows default output")], speech.action_set_announce_output,
+                             [("", f"{OS_NAME} default output")], speech.action_set_announce_output,
                              *self.field("output"),
                              description="This computer's own speakers or headphones keep "
                                          "announcements out of your recording, and audible when "
@@ -130,8 +130,8 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
                              words=lambda v: "silent" if v == 0 else f"{v} percent")
         self.volume.slider.SetLineSize(5)
         self.volume.slider.SetPageSize(20)
-        self.volume.acc.description = ("Announcements only. Windows, your screen reader and the "
-                                       "desk are not affected.")
+        self.volume.acc.description = (f"Announcements only. {OS_NAME}, your screen reader and "
+                                       "the desk are not affected.")
         self.SetupScrolling(scroll_x=False)
 
     def field(self, key):
@@ -144,7 +144,7 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
         if self.data is None:
             return self._unread()
         if not self.data.get(kind):
-            return f"Windows reported no {kind} to this computer, so there is nothing to choose."
+            return f"{OS_NAME} reported no {kind} to this computer, so there is nothing to choose."
         return None
 
     def read(self, announce=False):
@@ -158,9 +158,9 @@ class AnnouncementsPage(scrolled.ScrolledPanel):
         self.data = data
         for switch in self.switches:
             switch.show()
-        self.voice.set_items([("", "Windows default voice")]
+        self.voice.set_items([("", f"{OS_NAME} default voice")]
                              + [(name, name) for name in data.get("voices") or []])
-        self.output.set_items([("", "Windows default output")]
+        self.output.set_items([("", f"{OS_NAME} default output")]
                               + [(name, name) for name in data.get("outputs") or []])
         for control in (self.record_feedback, self.value_speech, self.voice, self.output,
                         self.volume):

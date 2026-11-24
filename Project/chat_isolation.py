@@ -16,6 +16,7 @@ import output_mixes
 import rcp_read
 import rcp_transfer
 from desk_labels import CUSTOM
+from wording import OS_NAME
 
 
 NOT_RESTORED = ("WARNING: the Chat mix could not be put back. It may still be carrying one "
@@ -36,18 +37,18 @@ _owner: ChatIsolation | None = None
 
 
 def endpoint_to_unity(endpoint_id: str) -> str:
-    """Unmute the Chat capture endpoint and set its Windows level to 0 dB, and return the sentence
+    """Unmute the Chat capture endpoint and set its system level to 0 dB, and return the sentence
     saying what changed, which is "" when nothing did. Its level scales every reading and its mute
     makes a working microphone read as silence."""
     said = ""
     try:
         now = meters.endpoint_volume(endpoint_id)
         if now.get("muted") and meters.set_endpoint_mute(endpoint_id, False).get("ok"):
-            said = "Cleared the Windows mute on the Chat device. "
+            said = f"Cleared the {OS_NAME} mute on the Chat device. "
         db = now.get("db")
         if ((db is None or abs(db) >= 0.2)
                 and meters.set_endpoint_volume_db(endpoint_id, 0.0).get("ok")):
-            said += "Windows level on the Chat device set to no change. "
+            said += f"{OS_NAME} level on the Chat device set to no change. "
     except Exception as exc:
         diagnostics.event("meters.chat_endpoint", "could not set the Chat endpoint", error=str(exc))
     return said
