@@ -515,8 +515,8 @@ class _Restore:
         self.errs.append(what)
 
     def note(self, sentence):
-        """A sentence for the end of the result that is not a failure: what happened to the
-        processing of a moved channel, or what RODE's driver is doing after a USB mode change."""
+        """A sentence for the end of the result that is not a failure, such as what happened to
+        the processing of a channel the layout moved."""
         if sentence and sentence.strip():
             self.notes.append(sentence.strip())
 
@@ -762,10 +762,15 @@ def _restore_usb_mode(rs, r):
         return None
     expanded = bool(r.get("usb_expanded"))
 
+    # The switch's own sentence goes out as a progress step, when it is said: "Windows sound is on
+    # the speakers until RODE's driver connects" is true now and may not be by the end of the
+    # restore, and the driver's follow-up announces the outcome itself.
     def usb_mode(mode):
         rs.step("Setting what the desk sends this computer. Its audio devices will drop out "
                 "for a couple of seconds.")
-        rs.note(usb_audio.switch_usb_mode(recorder.join_usb_multitrack(mode, expanded)))
+        said = usb_audio.switch_usb_mode(recorder.join_usb_multitrack(mode, expanded)).strip()
+        if said:
+            rs.step(said)
 
     failed = rs.failed
     if rs.choice("USB multitrack", r["usb_multitrack"], rcp_transfer.MULTITRACK_MODES,

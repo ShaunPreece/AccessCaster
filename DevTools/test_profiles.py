@@ -571,7 +571,8 @@ def recorder(desk_faders=None, chain_follow=False):
     with patched((rcp_transfer, {**{n: _recording(n) for n in RECORDED_TRANSFER},
                                  "set_fader_source": set_fader_source}),
                  (channels, {n: _recording(n) for n in RECORDED_CHANNELS}),
-                 (usb_audio, {"switch_usb_mode": _recording("switch_usb_mode")}),
+                 (usb_audio, {"switch_usb_mode": lambda *a: _recording("switch_usb_mode")(*a)
+                              or ""}),
                  (rcp_read, {"read_model": lambda **_k: b""}),
                  (faders, {"read_fader_vector": lambda blob=None, spec=None: list(vec),
                            "chain_follow_on": lambda: chain_follow})):
@@ -731,6 +732,14 @@ check_true("the USB mode is written before the first fader source",
            names_of(calls_up).index("switch_usb_mode")
            < names_of(calls_up).index("set_fader_source"))
 check("and nothing is reported as unrestorable", res_up["errs"], [])
+# What the switch says is true when it is said, so it goes out as progress, never in the result.
+steps = []
+with as_device(devices.PRO2), recorder(), \
+        patched((usb_audio, {"switch_usb_mode": lambda _v: " Windows sound is on Speakers."})):
+    res_said = profiles.apply(profile(usb_multitrack=2, usb_expanded=True),
+                              fader_spec=devices.PRO2.fader, progress=steps.append)
+check_true("the switch's sentence is a progress step", "Windows sound is on Speakers." in steps)
+check("and not in the result", [n for n in res_said["notes"] if "Windows" in n], [])
 # With no saved mode the desk stays as it is, so in Standard the four are refused, and SAID.
 with patched((channels, {"usb_expanded": lambda: False})):
     calls_no, res_no = apply_pro2(profile(faders=EXP_FADERS))
