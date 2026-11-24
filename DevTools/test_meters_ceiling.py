@@ -1,9 +1,8 @@
 """Offline: two meter faults that code review cannot see. No device, no microphone.
 
-  1. THE CAPTURE ENGINE WAKER. An input endpoint delivers no peak until a capture stream is open
-     on it, so without `meters._EngineWaker` an input's meter reads 0.0 however loud the
-     microphone is. Over Remote Desktop the desk's endpoints do not exist at all, so a meter
-     exercised only there cannot show the fault.
+  1. AN INPUT THAT COULD NOT BE STARTED. An input endpoint delivers no peak until a capture
+     stream is open on it (`test_win_meters` pins Windows' waker), so when that fails a reading of
+     0.0 is no evidence of silence and must not be called silent.
 
   2. THE ENDPOINT CEILING. Windows' own capture level scales an input's meter. At a capture level
      of -1.08 dB a signal at TRUE full scale reads 0.883 (measured: 88.3 percent of the signal,
@@ -20,7 +19,6 @@ from __future__ import annotations
 
 import re
 import sys
-import time
 from pathlib import Path
 
 import _bootstrap  # noqa: F401
@@ -28,6 +26,7 @@ import _testkit
 import meters
 import tones
 from _testkit import check, check_true, patched
+from wording import OS_NAME
 
 
 def close(label, got, want, tol=1e-3):
@@ -94,7 +93,7 @@ check("a heavily attenuated input is called out too",
       "taking 12.0 dB off" in meters.level_note(-12.0), True)
 clip_boosted = meters.describe(1.0, 1.0, NAME, ceiling=1.0, volume_db=7.67)
 check("clipping on a BOOSTED input blames Windows, not the desk",
-      "Windows is adding" in clip_boosted, True)
+      f"{OS_NAME} is adding" in clip_boosted, True)
 check("and it does NOT just say turn it down, which would be the wrong knob",
       clip_boosted.endswith("Turn it down."), False)
 check("clipping at unity still says turn it down",
@@ -109,14 +108,8 @@ check("an unwoken input explains that nothing is recording from it",
       "recording from it" in unwoken, True)
 check("the two sentences are different", silent == unwoken, False)
 
-print("\nTHE WAKER IS ACTUALLY WIRED UP (the whole of bug 1)")
+print("\nTHE WATCHER FOLLOWS THE ENDPOINT LEVEL")
 src = Path(meters.__file__).read_text(encoding="utf-8")
-check("_EngineWaker exists", hasattr(meters, "_EngineWaker"), True)
-check("Meter constructs it, rather than only declaring the class",
-      "_EngineWaker(dev)" in src, True)
-check("it is only started for INPUTS", "if self.is_capture:" in src, True)
-check("shared mode, never exclusive (exclusive would steal the mic from every other app)",
-      "AUDCLNT_SHAREMODE_SHARED" in src and meters.AUDCLNT_SHAREMODE_SHARED == 0, True)
 check("Watcher follows the endpoint volume while running",
       "refresh_ceiling()" in src and "CEILING_REFRESH_S" in src, True)
 # THE APP NEVER MOVES WINDOWS' LEVEL ON ITS OWN, because that changes what EVERY application on the
@@ -126,14 +119,13 @@ check("Watcher follows the endpoint volume while running",
 # Watcher, sample, describe - ever writes.
 check("a setter exists, for the control the user operates",
       hasattr(meters, "set_endpoint_volume_db"), True)
-check("it READS BACK rather than trusting the write (a driver can refuse silently)",
-      "GetMasterVolumeLevel()" in src.split("def set_endpoint_volume_db")[1][:1200], True)
+check("it judges the level that READS BACK, not the one it wrote (a driver can refuse silently)",
+      "got = write_level(" in src.split("def set_endpoint_volume_db")[1][:1600], True)
 check("the offered range is narrowed: -96 dB is OFF, not quiet",
       meters.OFFERED_LEVEL_MIN_DB >= -30.0, True)
-metering_only = src.split("def endpoint_volume")[0]
+metering_only = src.split('"""', 2)[2].split("def endpoint_volume")[0]     # past the docstring
 check("NOTHING in the metering path itself writes a level",
-      "SetMasterVolumeLevel(" in metering_only.replace(
-          'COMMETHOD([], HRESULT, "SetMasterVolumeLevel"', ""), False)
+      [w for w in ("write_level(", "write_mute(") if w in metering_only], [])
 
 print("\nA METER THAT FAILS IS NOT A QUIET ONE")
 
@@ -165,68 +157,34 @@ finally:
     meters.Meter = real_meter
 
 
-class _Removed:
-    """An endpoint Windows has taken away: its meter still answers 0, its state is not active."""
-    def GetPeakValue(self):
-        return 0.0
+class _Reader:
+    """A platform endpoint reader with a given level, or whose level read fails."""
 
-    def GetState(self):
-        return 0x4          # DEVICE_STATE_NOTPRESENT
+    def __init__(self, level):
+        self._level = level
+
+    def level(self):
+        if isinstance(self._level, Exception):
+            raise self._level
+        return self._level
 
 
+print("\nA LEVEL READ THAT FAILS IS NOT TAKEN FOR AN ANSWER")
 m = object.__new__(meters.Meter)
-m.name, m._dev, m._meter = "Desk", _Removed(), _Removed()
-m._checked = time.monotonic()
-check("a removed endpoint reads 0 until the next state check", m.peak(), 0.0)
-m._checked -= meters.PRESENT_CHECK_S
-try:
-    m.peak()
-    raised = False
-except OSError:
-    raised = True
-check("then raises, so a Watcher on it ends and can be reopened", raised, True)
-
-print("\nAN ENDPOINT READ THAT FAILS IS NOT TAKEN FOR AN ANSWER")
-
-
-class _BrokenEnumerator:
-    def EnumAudioEndpoints(self, *_a):
-        raise OSError("enumerator gone")
-
-
-try:
-    meters._is_capture_endpoint(_BrokenEnumerator(), "endpoint")
-    raised = False
-except OSError:
-    raised = True
-check("an unreadable capture list raises, rather than calling an input an output", raised, True)
-
-events = []
-
-
-def _no_enumerator(*_a, **_k):
-    raise OSError("class not registered")
-
-
-with patched((meters.diagnostics, {"event": lambda kind, detail="", **f: events.append(kind)}),
-             (meters.comtypes.client, {"CreateObject": _no_enumerator})):
-    listed = meters.list_endpoints()
-check("an enumerator that cannot be created lists nothing", listed, [])
-check("and says why in the log", events, ["meters.enumerate_failed"])
-
-
-class _BrokenVolume:
-    def GetMasterVolumeLevel(self):
-        raise OSError("volume read failed")
-
-
-m = object.__new__(meters.Meter)
-m.name, m._vol, m.is_capture, m.ceiling = "Desk", _BrokenVolume(), True, 0.5
+m.name, m._reader, m.is_capture, m.ceiling = "Desk", _Reader(OSError("read failed")), True, 0.5
 events = []
 with patched((meters.diagnostics, {"event": lambda kind, detail="", **f: events.append(kind)})):
     kept = m.refresh_ceiling()
 check("a failed volume read keeps the last ceiling", kept, 0.5)
 check("and logs it", events, ["meters.volume_read_failed"])
+
+m = object.__new__(meters.Meter)
+m.name, m._reader, m.is_capture = "Desk", _Reader(None), True
+m.volume_db, m.ceiling, m.muted = 0.0, 1.0, False
+check("an endpoint with no level keeps unity", m.refresh_ceiling(), 1.0)
+m._reader = _Reader((-1.08, True))
+close("an input's level sets its ceiling", m.refresh_ceiling(), 0.8832)
+check("and its mute is followed", m.muted, True)
 
 print("\nTHE METER CUES PLAY ON THE ANNOUNCER'S OUTPUT")
 played = []

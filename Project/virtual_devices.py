@@ -50,6 +50,7 @@ import meters
 import write_guard
 from comtypes import COMMETHOD, GUID, HRESULT, IUnknown
 from paths import data_path
+from win import core_audio as ca
 
 # Names the service creates. The status block is what its tray icon reads (readable by everyone);
 # the command block is what the tray writes (Enable, Latency), which the service mirrors into its
@@ -267,8 +268,7 @@ E_CONSOLE, E_MULTIMEDIA, E_COMMUNICATIONS = 0, 1, 2
 class IPolicyConfig(IUnknown):
     """The interface the Sound control panel uses to enable an endpoint and to set the default
     device. Undocumented but stable since Vista, and it needs no elevation. EVERY METHOD IS
-    DECLARED, IN ORDER, for the reason `meters.IAudioEndpointVolume` gives: a COM vtable is
-    positional, and only the last two are called."""
+    DECLARED, IN ORDER, because a COM vtable is positional; only the last two are called."""
     _iid_ = GUID("{f8679f50-850a-41cf-9c72-430f290290c8}")
     _methods_ = (
         COMMETHOD([], HRESULT, "GetMixFormat", (["in"], wintypes.LPCWSTR), (["out"], ctypes.POINTER(ctypes.c_void_p))),
@@ -296,22 +296,12 @@ def _policy():
     return comtypes.client.CreateObject(CLSID_PolicyConfigClient, interface=IPolicyConfig)
 
 
-def _prop(store, key) -> str:
-    k = meters.PROPERTYKEY()
-    k.fmtid, k.pid = key
-    try:
-        pv = store.GetValue(ctypes.byref(k))
-        return pv.pwszVal or "" if pv.vt == 31 else ""
-    except Exception:
-        return ""
-
-
 @dataclass
 class Endpoint:
     id: str
     name: str
     flow: str                       # "playback" or "recording"
-    state: str                      # meters.STATE_NAMES
+    state: str                      # core_audio.STATE_NAMES
     virtual: bool                   # one of the driver's, as opposed to the desk's own USB audio
     desk: bool                      # the desk's own USB audio (Main, Chat, Secondary)
 
@@ -320,30 +310,29 @@ class Endpoint:
 def _audio():
     """A COM apartment on this thread and Windows' endpoint enumerator, for one piece of work.
     Every caller here opens its own, because each runs on whatever thread asked."""
-    with meters.com_apartment():
-        yield comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
-                                           interface=meters.IMMDeviceEnumerator)
+    with ca.apartment():
+        yield ca.enumerator()
 
 
 def _endpoints(enum) -> list:
     """Every endpoint Windows knows about, tagged by owner. Caller holds the COM apartment."""
     out = []
-    for flow in (meters.RENDER, meters.CAPTURE):
+    for flow in (ca.RENDER, ca.CAPTURE):
         try:
-            coll = enum.EnumAudioEndpoints(flow, meters.STATE_ALL)
+            coll = enum.EnumAudioEndpoints(flow, ca.STATE_ALL)
             count = coll.GetCount()
         except Exception:
             continue
         for i in range(count):
             try:
                 dev = coll.Item(i)
-                store = dev.OpenPropertyStore(meters.STGM_READ)
-                owner = _prop(store, PKEY_DeviceInterface_FriendlyName)
-                enumerator = _prop(store, PKEY_Device_EnumeratorName)
-                name = meters._friendly_name(dev)
+                store = dev.OpenPropertyStore(ca.STGM_READ)
+                owner = ca.prop_string(store, PKEY_DeviceInterface_FriendlyName)
+                enumerator = ca.prop_string(store, PKEY_Device_EnumeratorName)
+                name = ca.friendly_name(dev)
                 out.append(Endpoint(
-                    id=dev.GetId(), name=name, flow=meters.FLOW_NAMES[flow],
-                    state=meters.STATE_NAMES.get(dev.GetState(), "unknown"),
+                    id=dev.GetId(), name=name, flow=ca.FLOW_NAMES[flow],
+                    state=ca.STATE_NAMES.get(dev.GetState(), "unknown"),
                     virtual=(enumerator.upper() == "ROOT" and meters.is_desk_endpoint(owner)),
                     desk=(enumerator.upper() == "USB" and meters.is_desk_endpoint(owner)),
                 ))
@@ -354,7 +343,7 @@ def _endpoints(enum) -> list:
 
 def _default_id(enum, role: int) -> str:
     try:
-        return enum.GetDefaultAudioEndpoint(meters.RENDER, role).GetId()
+        return enum.GetDefaultAudioEndpoint(ca.RENDER, role).GetId()
     except Exception:
         return ""
 
@@ -667,9 +656,9 @@ def _is_desk_usb(enum, endpoint_id: str) -> bool:
     """Whether one endpoint is the desk's own USB audio, as `_endpoints` tags it. Not the driver's
     System: the default landing there means the service has bound."""
     try:
-        store = enum.GetDevice(endpoint_id).OpenPropertyStore(meters.STGM_READ)
-        return (_prop(store, PKEY_Device_EnumeratorName).upper() == "USB"
-                and meters.is_desk_endpoint(_prop(store, PKEY_DeviceInterface_FriendlyName)))
+        store = enum.GetDevice(endpoint_id).OpenPropertyStore(ca.STGM_READ)
+        return (ca.prop_string(store, PKEY_Device_EnumeratorName).upper() == "USB"
+                and meters.is_desk_endpoint(ca.prop_string(store, PKEY_DeviceInterface_FriendlyName)))
     except Exception:
         return False
 
@@ -724,7 +713,7 @@ class _EndpointNotifier(comtypes.COMObject):
     here would block the audio service while it talks to us about the devices we are changing.
     Every method takes `*args` because comtypes hands the raw `this` pointer to some builds and not
     others, and none of the arguments matter - the answer to all five is the same, go and look."""
-    _com_interfaces_ = [meters.IMMNotificationClient]
+    _com_interfaces_ = [ca.IMMNotificationClient]
 
     def __init__(self, wake: threading.Event):
         super().__init__()
@@ -759,10 +748,9 @@ def watch_endpoints(on_change, stop: threading.Event) -> None:
     app down with it is worse than no repair path."""
     wake = threading.Event()
     enum = client = None
-    with meters.com_apartment():
+    with ca.apartment():
         try:
-            enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
-                                                interface=meters.IMMDeviceEnumerator)
+            enum = ca.enumerator()
             client = _EndpointNotifier(wake)
             enum.RegisterEndpointNotificationCallback(client)
             diagnostics.event("virtual_devices.watch", "listening for endpoint changes")

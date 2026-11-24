@@ -28,11 +28,11 @@ import _bootstrap  # noqa: F401
 import comtypes
 import comtypes.client
 import desk_access
-import meters
 import rcp_read
 import recorder
 import virtual_devices as vd
 import _desk
+from win import core_audio as ca
 import usb_audio
 
 EXPANDED_PID = "pid_0094"       # post-fader multitrack AND Expanded: the mode with fader inputs
@@ -188,8 +188,7 @@ def main() -> None:
     _desk.service(start=True)
 
     comtypes.CoInitialize()
-    enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
-                                        interface=meters.IMMDeviceEnumerator)
+    enum = ca.enumerator()
     policy = comtypes.client.CreateObject(vd.CLSID_PolicyConfigClient, interface=vd.IPolicyConfig)
     eps = vd._endpoints(enum)
     by_id = {e.id: e for e in eps}

@@ -16,13 +16,12 @@ import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path)
 import comtypes
-import comtypes.client
 import desk_access
-import meters
 import rcp_read
 import recorder
 import virtual_devices as vd
 import _desk
+from win import core_audio as ca
 import usb_audio
 
 HOLD_S = 10.0
@@ -53,10 +52,10 @@ def settle() -> None:
 
 def main_endpoints(enum):
     out = {}
-    coll = enum.EnumAudioEndpoints(meters.RENDER, 1)
+    coll = enum.EnumAudioEndpoints(ca.RENDER, 1)
     for i in range(coll.GetCount()):
         dev = coll.Item(i)
-        name = meters._friendly_name(dev)
+        name = ca.friendly_name(dev)
         if "RODECaster" in name and "Main" in name:
             out[dev.GetId()] = (name, dev)
     return out
@@ -64,16 +63,14 @@ def main_endpoints(enum):
 
 def holder(before, result):
     comtypes.CoInitialize()
-    enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
-                                        interface=meters.IMMDeviceEnumerator)
+    enum = ca.enumerator()
     t0 = time.monotonic()
     while time.monotonic() - t0 < 20:
         for eid, (name, dev) in main_endpoints(enum).items():
             if eid in before:
                 continue
             try:
-                client = dev.Activate(meters.IAudioClient._iid_, meters.CLSCTX_ALL,
-                                      None).QueryInterface(meters.IAudioClient)
+                client = ca.activate(dev, ca.IAudioClient)
                 fmt = client.GetMixFormat()
                 client.Initialize(0, 0, 1000000, 0, fmt, None)
                 client.Start()
@@ -138,8 +135,7 @@ def main() -> int:
         print("Could not read the desk's USB mode, so it could not be put back. Stopping.")
         return 1
     comtypes.CoInitialize()
-    enum = comtypes.client.CreateObject(meters.CLSID_MMDeviceEnumerator,
-                                        interface=meters.IMMDeviceEnumerator)
+    enum = ca.enumerator()
     try:
         if not expanded_before:
             post(usb_audio.action_set_usb_expanded, True)

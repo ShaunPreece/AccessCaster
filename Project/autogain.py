@@ -86,7 +86,7 @@ def chat_endpoint():
     """The unit's Chat capture endpoint: where an isolated channel comes back to the computer."""
     for e in meters.list_endpoints():
         if (meters.is_desk_endpoint(e["name"]) and e["active"]
-                and e["flow"] == meters.FLOW_NAMES[meters.CAPTURE] and "Chat" in e["name"]):
+                and e["flow"] == meters.RECORDING and "Chat" in e["name"]):
             return e
     return None
 

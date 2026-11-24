@@ -36,7 +36,7 @@ def clip_warning_on() -> bool:
 def _main_mix_stream(found: dict):
     """The desk's main recording endpoint, or its first recording endpoint, or None."""
     inputs = [s for s in found.get("streams") or []
-              if s.get("flow") == meters.FLOW_NAMES[meters.CAPTURE]]
+              if s.get("flow") == meters.RECORDING]
     main = [s for s in inputs if "main stereo" in s["name"].lower()]
     return (main or inputs or [None])[0]
 

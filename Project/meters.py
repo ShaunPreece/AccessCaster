@@ -1,210 +1,48 @@
-"""AccessCaster - level metering, read from Windows rather than from the desk.
+"""AccessCaster - level metering, read from the computer rather than from the desk.
 
 The desk publishes no meter values over its USB control channel, but it is also a USB audio
-interface, and Windows meters every audio endpoint. So this reads the peak of the desk's own streams
-(Main Stereo, Chat, Secondary, Multitrack) through IAudioMeterInformation: one COM call, using the
-`comtypes` dependency the app already has, where a capture library would add PortAudio, numpy and a
-capture thread per stream.
+interface, and the system meters every audio endpoint. So this reads the peak of the desk's own
+streams (Main Stereo, Chat, Secondary, Multitrack), and judges and speaks it.
 
 Limits:
   - It is a PEAK per ENDPOINT, not per channel. "Is Mic 2 live" is answerable only when Mic 2 is
     alone on a stream (the per-channel check builds such a mix).
-  - A capture endpoint reads 0 unless something is recording from it, so `Meter` opens a silent
-    shared-mode client to start its engine (`_EngineWaker`).
   - It is linear 0..1 amplitude, not a calibrated reading of the desk's own meters, and will not
     agree with them exactly.
+
+The platform supplies:
+  - `list_endpoints()`: every audio endpoint the system knows about, as dicts of "id", "name",
+    "flow" (`PLAYBACK` or `RECORDING`), "state" (in words) and "active". Never raises.
+  - `remote_session()`: True when this session cannot reach the console's audio devices.
+  - `EndpointReader(endpoint_id)`: one endpoint held open for polling, made, read and closed on ONE
+    thread. `name`; `is_capture`; `wake_failed`, True when an input's level cannot be read because
+    recording from it could not be started; `peak()`, 0 to 1, raising once the endpoint has gone;
+    `level()`, the system's own (level in dB, muted) for it, None when it has none, raising when it
+    cannot be read; `close()`.
+  - `read_level(endpoint_id)`: {"name", "db", "range": (min dB, max dB, step) or None when the
+    driver reports none, "muted"}. Raises.
+  - `write_mute(endpoint_id, muted)` and `write_level(endpoint_id, db)`: set it and return what
+    reads back. Raise.
 """
 from __future__ import annotations
 
-import contextlib
-import ctypes
 import math
+import sys
 import threading
 import time
-from ctypes import POINTER, c_float, c_int32, c_uint32, c_void_p, c_wchar_p
-
-import comtypes
-import comtypes.client
-from comtypes import COMMETHOD, GUID, HRESULT, IUnknown
 
 import diagnostics
 import speech
 import write_guard
+from wording import OS_NAME
 
-CLSID_MMDeviceEnumerator = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
+if sys.platform == "win32":
+    from win.meters import (EndpointReader, list_endpoints, read_level, remote_session,
+                            write_level, write_mute)
+else:
+    raise ImportError(f"No level meters for {sys.platform}: the Windows ones are win/meters.py")
 
-# Data flow and state constants from mmdeviceapi.h.
-RENDER, CAPTURE = 0, 1
-STATE_ACTIVE, STATE_ALL = 0x1, 0xF
-CLSCTX_ALL = 0x17
-
-# PKEY_Device_FriendlyName: the name Windows shows, e.g. "RODECaster Pro II Main Stereo".
-PKEY_Device_FriendlyName = (GUID("{a45c254e-df1c-4efd-8020-67d146a850e0}"), 14)
-STGM_READ = 0
-
-
-class PROPVARIANT(ctypes.Structure):
-    """Only the fields we read. A friendly name comes back as VT_LPWSTR (31), so the pointer member
-    is all we need; anything else is reported as empty rather than mis-decoded."""
-    _fields_ = [("vt", ctypes.c_ushort), ("wReserved1", ctypes.c_ushort),
-                ("wReserved2", ctypes.c_ushort), ("wReserved3", ctypes.c_ushort),
-                ("pwszVal", c_wchar_p), ("padding", ctypes.c_byte * 8)]
-
-
-class PROPERTYKEY(ctypes.Structure):
-    _fields_ = [("fmtid", GUID), ("pid", ctypes.c_ulong)]
-
-
-class IPropertyStore(IUnknown):
-    _iid_ = GUID("{886d8eeb-8cf2-4446-8d02-cdba1dbdcf99}")
-    _methods_ = (
-        COMMETHOD([], HRESULT, "GetCount", (["out"], POINTER(c_uint32), "cProps")),
-        COMMETHOD([], HRESULT, "GetAt", (["in"], c_uint32, "iProp"),
-                  (["out"], POINTER(PROPERTYKEY), "pkey")),
-        COMMETHOD([], HRESULT, "GetValue", (["in"], POINTER(PROPERTYKEY), "key"),
-                  (["out"], POINTER(PROPVARIANT), "pv")),
-    )
-
-
-class IAudioMeterInformation(IUnknown):
-    _iid_ = GUID("{C02216F6-8C67-4B5B-9D00-D008E73E0064}")
-    _methods_ = (
-        COMMETHOD([], HRESULT, "GetPeakValue", (["out"], POINTER(c_float), "pfPeak")),
-        COMMETHOD([], HRESULT, "GetMeteringChannelCount",
-                  (["out"], POINTER(c_uint32), "pnChannelCount")),
-        COMMETHOD([], HRESULT, "GetChannelsPeakValues",
-                  (["in"], c_uint32, "u32ChannelCount"),
-                  (["in"], POINTER(c_float), "afPeakValues")),
-    )
-
-
-class IAudioClient(IUnknown):
-    """Used only to wake a capture endpoint (`_EngineWaker`): Initialize, Start, Stop and
-    GetMixFormat. The rest are declared because a COM vtable is positional."""
-    _iid_ = GUID("{1CB9AD4C-DBFA-4c32-B178-C2F568A703B2}")
-    _methods_ = (
-        COMMETHOD([], HRESULT, "Initialize", (["in"], c_uint32, "ShareMode"),
-                  (["in"], c_uint32, "StreamFlags"), (["in"], ctypes.c_longlong, "hnsBufferDuration"),
-                  (["in"], ctypes.c_longlong, "hnsPeriodicity"),
-                  (["in"], c_void_p, "pFormat"), (["in"], POINTER(GUID), "AudioSessionGuid")),
-        COMMETHOD([], HRESULT, "GetBufferSize", (["out"], POINTER(c_uint32), "pNumBufferFrames")),
-        COMMETHOD([], HRESULT, "GetStreamLatency", (["out"], POINTER(ctypes.c_longlong), "phns")),
-        COMMETHOD([], HRESULT, "GetCurrentPadding", (["out"], POINTER(c_uint32), "pNumPadding")),
-        COMMETHOD([], HRESULT, "IsFormatSupported", (["in"], c_uint32, "ShareMode"),
-                  (["in"], c_void_p, "pFormat"), (["out"], POINTER(c_void_p), "ppClosestMatch")),
-        COMMETHOD([], HRESULT, "GetMixFormat", (["out"], POINTER(c_void_p), "ppDeviceFormat")),
-        COMMETHOD([], HRESULT, "GetDevicePeriod",
-                  (["out"], POINTER(ctypes.c_longlong), "phnsDefaultDevicePeriod"),
-                  (["out"], POINTER(ctypes.c_longlong), "phnsMinimumDevicePeriod")),
-        COMMETHOD([], HRESULT, "Start"),
-        COMMETHOD([], HRESULT, "Stop"),
-        COMMETHOD([], HRESULT, "Reset"),
-        COMMETHOD([], HRESULT, "SetEventHandle", (["in"], c_void_p, "eventHandle")),
-        COMMETHOD([], HRESULT, "GetService", (["in"], POINTER(GUID), "riid"),
-                  (["out"], POINTER(POINTER(IUnknown)), "ppv")),
-    )
-
-
-class IAudioEndpointVolume(IUnknown):
-    """Windows' own level for an endpoint: read for the meter's ceiling, written only from a
-    control the user operates (it changes what every application on the machine records).
-
-    It scales an INPUT's meter: at -1.08 dB a true full-scale signal reads 10^(-1.08/20) = 0.883, so
-    a fixed clip threshold of 0.99 is unreachable. An output's meter it leaves alone. See
-    `reading_scale`.
-
-    Every method is declared, in order, even the unused ones: a COM vtable is positional, so a gap
-    makes every later method call the wrong slot.
-    """
-    _iid_ = GUID("{5CDF2C82-841E-4546-9722-0CF74078229A}")
-    _methods_ = (
-        COMMETHOD([], HRESULT, "RegisterControlChangeNotify", (["in"], c_void_p, "pNotify")),
-        COMMETHOD([], HRESULT, "UnregisterControlChangeNotify", (["in"], c_void_p, "pNotify")),
-        COMMETHOD([], HRESULT, "GetChannelCount", (["out"], POINTER(c_uint32), "pnChannelCount")),
-        COMMETHOD([], HRESULT, "SetMasterVolumeLevel", (["in"], c_float, "fLevelDB"),
-                  (["in"], POINTER(GUID), "pguidEventContext")),
-        COMMETHOD([], HRESULT, "SetMasterVolumeLevelScalar", (["in"], c_float, "fLevel"),
-                  (["in"], POINTER(GUID), "pguidEventContext")),
-        COMMETHOD([], HRESULT, "GetMasterVolumeLevel", (["out"], POINTER(c_float), "pfLevelDB")),
-        COMMETHOD([], HRESULT, "GetMasterVolumeLevelScalar", (["out"], POINTER(c_float), "pfLevel")),
-        COMMETHOD([], HRESULT, "SetChannelVolumeLevel", (["in"], c_uint32, "nChannel"),
-                  (["in"], c_float, "fLevelDB"), (["in"], POINTER(GUID), "pguidEventContext")),
-        COMMETHOD([], HRESULT, "SetChannelVolumeLevelScalar", (["in"], c_uint32, "nChannel"),
-                  (["in"], c_float, "fLevel"), (["in"], POINTER(GUID), "pguidEventContext")),
-        COMMETHOD([], HRESULT, "GetChannelVolumeLevel", (["in"], c_uint32, "nChannel"),
-                  (["out"], POINTER(c_float), "pfLevelDB")),
-        COMMETHOD([], HRESULT, "GetChannelVolumeLevelScalar", (["in"], c_uint32, "nChannel"),
-                  (["out"], POINTER(c_float), "pfLevel")),
-        COMMETHOD([], HRESULT, "SetMute", (["in"], c_int32, "bMute"),
-                  (["in"], POINTER(GUID), "pguidEventContext")),
-        COMMETHOD([], HRESULT, "GetMute", (["out"], POINTER(c_int32), "pbMute")),
-        COMMETHOD([], HRESULT, "GetVolumeStepInfo", (["out"], POINTER(c_uint32), "pnStep"),
-                  (["out"], POINTER(c_uint32), "pnStepCount")),
-        COMMETHOD([], HRESULT, "VolumeStepUp", (["in"], POINTER(GUID), "pguidEventContext")),
-        COMMETHOD([], HRESULT, "VolumeStepDown", (["in"], POINTER(GUID), "pguidEventContext")),
-        COMMETHOD([], HRESULT, "QueryHardwareSupport", (["out"], POINTER(c_uint32), "pdwMask")),
-        COMMETHOD([], HRESULT, "GetVolumeRange", (["out"], POINTER(c_float), "pfMin"),
-                  (["out"], POINTER(c_float), "pfMax"), (["out"], POINTER(c_float), "pfIncr")),
-    )
-
-
-class IMMDevice(IUnknown):
-    _iid_ = GUID("{D666063F-1587-4E43-81F1-B948E807363F}")
-    _methods_ = (
-        COMMETHOD([], HRESULT, "Activate", (["in"], POINTER(GUID), "iid"),
-                  (["in"], c_uint32, "dwClsCtx"), (["in"], c_void_p, "pActivationParams"),
-                  (["out"], POINTER(POINTER(IUnknown)), "ppInterface")),
-        COMMETHOD([], HRESULT, "OpenPropertyStore", (["in"], c_uint32, "stgmAccess"),
-                  (["out"], POINTER(POINTER(IPropertyStore)), "ppProperties")),
-        COMMETHOD([], HRESULT, "GetId", (["out"], POINTER(c_wchar_p), "ppstrId")),
-        COMMETHOD([], HRESULT, "GetState", (["out"], POINTER(c_uint32), "pdwState")),
-    )
-
-
-class IMMDeviceCollection(IUnknown):
-    _iid_ = GUID("{0BD7A1BE-7A1A-44DB-8397-CC5392387B5E}")
-    _methods_ = (
-        COMMETHOD([], HRESULT, "GetCount", (["out"], POINTER(c_uint32), "pcDevices")),
-        COMMETHOD([], HRESULT, "Item", (["in"], c_uint32, "nDevice"),
-                  (["out"], POINTER(POINTER(IMMDevice)), "ppDevice")),
-    )
-
-
-class IMMNotificationClient(IUnknown):
-    """Windows' audio-endpoint change callback, implemented by `virtual_devices`. The method
-    order is the vtable and must match mmdeviceapi.h."""
-    _iid_ = GUID("{7991EEC9-7E89-4D85-8390-6C703CEC60C0}")
-    _methods_ = (
-        COMMETHOD([], HRESULT, "OnDeviceStateChanged",
-                  (["in"], c_wchar_p, "pwstrDeviceId"), (["in"], c_uint32, "dwNewState")),
-        COMMETHOD([], HRESULT, "OnDeviceAdded", (["in"], c_wchar_p, "pwstrDeviceId")),
-        COMMETHOD([], HRESULT, "OnDeviceRemoved", (["in"], c_wchar_p, "pwstrDeviceId")),
-        COMMETHOD([], HRESULT, "OnDefaultDeviceChanged", (["in"], c_uint32, "flow"),
-                  (["in"], c_uint32, "role"), (["in"], c_wchar_p, "pwstrDefaultDeviceId")),
-        COMMETHOD([], HRESULT, "OnPropertyValueChanged", (["in"], c_wchar_p, "pwstrDeviceId"),
-                  (["in"], PROPERTYKEY, "key")),
-    )
-
-
-class IMMDeviceEnumerator(IUnknown):
-    _iid_ = GUID("{A95664D2-9614-4F35-A746-DE8DB63617E6}")
-    _methods_ = (
-        COMMETHOD([], HRESULT, "EnumAudioEndpoints", (["in"], c_uint32, "dataFlow"),
-                  (["in"], c_uint32, "dwStateMask"),
-                  (["out"], POINTER(POINTER(IMMDeviceCollection)), "ppDevices")),
-        COMMETHOD([], HRESULT, "GetDefaultAudioEndpoint", (["in"], c_uint32, "dataFlow"),
-                  (["in"], c_uint32, "role"), (["out"], POINTER(POINTER(IMMDevice)), "ppEndpoint")),
-        COMMETHOD([], HRESULT, "GetDevice", (["in"], c_wchar_p, "pwstrId"),
-                  (["out"], POINTER(POINTER(IMMDevice)), "ppDevice")),
-        COMMETHOD([], HRESULT, "RegisterEndpointNotificationCallback",
-                  (["in"], POINTER(IMMNotificationClient), "pClient")),
-        COMMETHOD([], HRESULT, "UnregisterEndpointNotificationCallback",
-                  (["in"], POINTER(IMMNotificationClient), "pClient")),
-    )
-
-
-STATE_NAMES = {0x1: "active", 0x2: "disabled", 0x4: "not present", 0x8: "unplugged"}
-FLOW_NAMES = {RENDER: "playback", CAPTURE: "recording"}
+PLAYBACK, RECORDING = "playback", "recording"
 
 # The desk's own streams, matched by substring: RODE spell the product with a slashed O in some
 # endpoint names and not others.
@@ -216,85 +54,19 @@ def is_desk_endpoint(name: str) -> bool:
     return any(h in low for h in DESK_HINTS)
 
 
-def _remote_session() -> bool:
-    """True in a Remote Desktop session (SM_REMOTESESSION). Windows gives each session its own
-    audio endpoints, so the desk's streams belong to the console session and a remote one cannot
-    meter them. Every other feature talks HID, which is session-independent."""
-    try:
-        return bool(ctypes.windll.user32.GetSystemMetrics(0x1000))
-    except Exception:
-        return False
-
-
-def _friendly_name(dev) -> str:
-    try:
-        store = dev.OpenPropertyStore(STGM_READ)
-        key = PROPERTYKEY()
-        key.fmtid, key.pid = PKEY_Device_FriendlyName
-        pv = store.GetValue(ctypes.byref(key))
-        return pv.pwszVal or ""
-    except Exception:
-        return ""
-
-
-@contextlib.contextmanager
-def com_apartment():
-    """COM on this thread for the block. COM is per thread, and this work runs on whatever thread
-    asked for it, so each piece opens its own."""
-    comtypes.CoInitialize()
-    try:
-        yield
-    finally:
-        try:
-            comtypes.CoUninitialize()
-        except Exception:    # an apartment already torn down at exit has nothing left to undo
-            pass
-
-
-def list_endpoints(state_mask: int = STATE_ALL) -> list:
-    """Every audio endpoint Windows knows about: id, name, direction, state. Never raises."""
-    out = []
-    with com_apartment():
-        try:
-            enum = comtypes.client.CreateObject(CLSID_MMDeviceEnumerator,
-                                                interface=IMMDeviceEnumerator)
-            # Endpoints come and go during an enumeration (an RDP session's audio device does so
-            # constantly), so one failing entry is skipped rather than emptying the list.
-            for flow in (RENDER, CAPTURE):
-                try:
-                    coll = enum.EnumAudioEndpoints(flow, state_mask)
-                    count = coll.GetCount()
-                except Exception:
-                    continue
-                for i in range(count):
-                    try:
-                        dev = coll.Item(i)
-                        state = dev.GetState()
-                        out.append({
-                            "id": dev.GetId(),
-                            "name": _friendly_name(dev),
-                            "flow": FLOW_NAMES[flow],
-                            "state": STATE_NAMES.get(state, f"unknown ({state})"),
-                            "active": state == STATE_ACTIVE,
-                        })
-                    except Exception:
-                        continue
-        except Exception as exc:
-            diagnostics.event("meters.enumerate_failed", str(exc))
-    return out
-
-
 def desk_streams() -> dict:
-    """What the app can meter right now. With nothing to meter, the reason distinguishes a Remote
-    Desktop session (nothing is wrong) from a console with no desk audio (unplugged, or the
-    driver). Transfer mode leaves the desk's audio devices in place."""
+    """What the app can meter right now. With nothing to meter, the reason distinguishes a remote
+    session (nothing is wrong) from a console with no desk audio (unplugged, or the driver).
+    Transfer mode leaves the desk's audio devices in place."""
     endpoints = list_endpoints()
     desk = [e for e in endpoints if is_desk_endpoint(e["name"])]
     active = [e for e in desk if e["active"]]
     if active:
         return {"ok": True, "streams": active, "reason": "",
-                "all_desk": desk, "remote": _remote_session()}
-    if _remote_session():
+                "all_desk": desk, "remote": remote_session()}
+    if remote_session():
+        # Only Windows reports a remote session: every other feature talks HID, which works from
+        # any session.
         return {"ok": False, "streams": [], "all_desk": desk, "remote": True,
                 "reason": ("Level meters need the RODECaster's audio streams, and Windows gives "
                            "each Remote Desktop session its own audio devices: from a remote "
@@ -302,15 +74,12 @@ def desk_streams() -> dict:
                            "this app works over Remote Desktop because it talks to the desk over "
                            "USB directly. Run the app at the computer itself to use the meters.")}
     return {"ok": False, "streams": [], "all_desk": desk, "remote": False,
-            "reason": ("Windows is not reporting any RODECaster audio streams. That usually means "
-                       "the desk's USB audio is not connected.")}
+            "reason": (f"{OS_NAME} is not reporting any RODECaster audio streams. That usually "
+                       "means the desk's USB audio is not connected.")}
 
 
-# How often a running Watcher re-reads the Windows endpoint volume.
+# How often a running Watcher re-reads the system's endpoint level.
 CEILING_REFRESH_S = 2.0
-
-# How often `Meter.peak` asks whether its endpoint is still there.
-PRESENT_CHECK_S = 2.0
 
 # A ceiling at or below this is not believed and becomes 1.0. Clamping it up instead (`max(0.05,
 # c)`) turns a failed volume read into a clip threshold of 0.05, announcing a whisper as clipping;
@@ -319,13 +88,15 @@ MIN_TRUSTED_CEILING = 0.05
 
 
 def reading_scale(volume_db: float, is_capture: bool) -> tuple:
-    """(the Windows level that scales a meter reading, the ceiling it gives): what a true
+    """(the system level that scales a meter reading, the ceiling it gives): what a true
     full-scale signal reads.
 
-    AN OUTPUT'S METER READS BEFORE WINDOWS' VOLUME, AN INPUT'S AFTER IT. On the desk's Main Stereo
-    pair a -6 dBFS tone reads 0.500 on the output at both -6.3 and -18.3 dB, while the input's
-    reading falls 12 dB with its level. Scaling an output by its volume calls ordinary speech
-    clipping, so an output is always read at full scale."""
+    AN OUTPUT'S METER READS BEFORE THE SYSTEM'S VOLUME, AN INPUT'S AFTER IT. The input's level
+    scales its meter: at -1.08 dB a true full-scale signal reads 10^(-1.08/20) = 0.883, so a fixed
+    clip threshold of 0.99 is unreachable. On the desk's Main Stereo pair a -6 dBFS tone reads
+    0.500 on the output at both -6.3 and -18.3 dB, while the input's reading falls 12 dB with its
+    level. Scaling an output by its volume calls ordinary speech clipping, so an output is always
+    read at full scale. (Measured on Windows.)"""
     if not is_capture:
         return 0.0, 1.0
     return volume_db, min(1.0, 10.0 ** (volume_db / 20.0))
@@ -340,122 +111,36 @@ def trusted_ceiling(ceiling: float) -> float:
     return c if MIN_TRUSTED_CEILING < c <= 1.0 else 1.0
 
 
-AUDCLNT_SHAREMODE_SHARED = 0
-# 1 second, in 100-nanosecond units. Nothing reads the buffer, so its size only sets how much
-# Windows discards before it wraps.
-WAKE_BUFFER_100NS = 10_000_000
-
-
-def _is_capture_endpoint(enum, endpoint_id: str) -> bool:
-    """True if this endpoint is an input, by asking Windows which list it is in. Never inferred
-    from the name: the capture and playback halves of a stream differ only by a prefix.
-
-    Raises when the capture list cannot be read: an input taken for an output gets no engine waker,
-    reads 0, and would be called silent."""
-    coll = enum.EnumAudioEndpoints(CAPTURE, STATE_ALL)
-    for i in range(coll.GetCount()):
-        try:
-            if coll.Item(i).GetId() == endpoint_id:
-                return True
-        except Exception:
-            continue                     # an endpoint removed mid-enumeration
-    return False
-
-
-class _EngineWaker:
-    """Hold a silent shared-mode capture client open so the endpoint's meter reports a level.
-
-    No frame is ever read: IAudioMeterInformation reports 0 on an input nothing is capturing from,
-    and this makes Windows run its engine. Shared mode, because exclusive mode would take the
-    microphone from every other application.
-    """
-
-    def __init__(self, dev):
-        self._client = None
-        self._fmt = None
-        client = dev.Activate(IAudioClient._iid_, CLSCTX_ALL, None).QueryInterface(IAudioClient)
-        self._fmt = client.GetMixFormat()
-        try:
-            client.Initialize(AUDCLNT_SHAREMODE_SHARED, 0, WAKE_BUFFER_100NS, 0, self._fmt, None)
-            client.Start()
-        except Exception:
-            self.close()                 # the mix format is CoTaskMem-allocated: free it
-            raise
-        self._client = client
-        # The first reads after Start() come back 0 while the engine spins up.
-        time.sleep(0.2)
-
-    def close(self):
-        if self._client is not None:
-            try:
-                self._client.Stop()
-            except Exception:
-                pass
-            self._client = None
-        if self._fmt is not None:
-            try:
-                ctypes.windll.ole32.CoTaskMemFree(self._fmt)
-            except Exception:
-                pass
-            self._fmt = None
-
-
 class Meter:
-    """One endpoint's meter, held open for polling. Create, read and close it on ONE thread: COM
-    apartments are per-thread and an interface pointer does not travel between them.
+    """One endpoint's meter, held open for polling. Create, read and close it on ONE thread
+    (`EndpointReader`).
 
-    On a capture endpoint it starts `_EngineWaker`; `wake_failed` says that could not be done, so a
-    reading of 0 says nothing about the microphone.
+    `wake_failed` says an input could not be started, so a reading of 0 says nothing about the
+    microphone. The system's own level and mute are followed with `refresh_ceiling`: a muted
+    endpoint reads 0, and must be reported as a mute rather than as a silent microphone.
     """
 
     def __init__(self, endpoint_id: str):
-        comtypes.CoInitialize()
         self.id = endpoint_id
-        self._dev = self._meter = self._vol = self._waker = None
-        self._checked = time.monotonic()
-        try:
-            self._open(endpoint_id)
-        except Exception:
-            self.close()                 # balances the CoInitialize on this thread
-            raise
-
-    def _open(self, endpoint_id: str):
-        enum = comtypes.client.CreateObject(CLSID_MMDeviceEnumerator,
-                                            interface=IMMDeviceEnumerator)
-        dev = enum.GetDevice(endpoint_id)
-        self._dev = dev
-        self.name = _friendly_name(dev)
-        self._meter = dev.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None) \
-                         .QueryInterface(IAudioMeterInformation)
-        self.is_capture = _is_capture_endpoint(enum, endpoint_id)
-        # What a true full-scale signal reads here, and Windows' own mute, which reads as 0 and must
-        # be reported as a mute rather than as a silent microphone.
+        self._reader = EndpointReader(endpoint_id)
+        self.name = self._reader.name
+        self.is_capture = self._reader.is_capture
+        self.wake_failed = self._reader.wake_failed
         self.volume_db = 0.0
         self.ceiling = 1.0
         self.muted = False
-        try:
-            self._vol = dev.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None) \
-                           .QueryInterface(IAudioEndpointVolume)
-            self.refresh_ceiling()
-        except Exception:
-            pass          # no volume interface: assume unity
-        self.wake_failed = False
-        if self.is_capture:
-            try:
-                self._waker = _EngineWaker(dev)
-            except Exception:
-                self.wake_failed = True
+        self.refresh_ceiling()
 
     def refresh_ceiling(self) -> float:
-        """Re-read the endpoint volume and mute, and return the ceiling (`reading_scale`).
-        Re-read rather than cached, because the Windows level is a live slider anything can move,
-        and the clip threshold follows it."""
-        if self._vol is None:
-            return self.ceiling
+        """Re-read the endpoint's level and mute, and return the ceiling (`reading_scale`).
+        Re-read rather than cached, because the system level is a live slider anything can move,
+        and the clip threshold follows it. An endpoint with no level keeps unity."""
         try:
-            self.volume_db, self.ceiling = reading_scale(
-                float(self._vol.GetMasterVolumeLevel()), self.is_capture)
-            self.muted = bool(self._vol.GetMute())
+            level = self._reader.level()
+            if level is not None:
+                db, muted = level
+                self.volume_db, self.ceiling = reading_scale(db, self.is_capture)
+                self.muted = muted
         except Exception as exc:
             # The previous ceiling stands, so the clip threshold may be stale.
             diagnostics.event("meters.volume_read_failed", str(exc), endpoint=self.name)
@@ -463,29 +148,11 @@ class Meter:
 
     def peak(self) -> float:
         """The current peak, 0 to 1. Raises when the endpoint has gone (the desk unplugged, or its
-        USB mode changed), which a caller must not read as silence.
-
-        The meter itself does not raise once its endpoint is removed: it goes on returning 0, and
-        reads again if the same endpoint comes back. So the endpoint's state is asked every
-        `PRESENT_CHECK_S`."""
-        now = time.monotonic()
-        if now - self._checked >= PRESENT_CHECK_S:
-            self._checked = now
-            if self._dev.GetState() != STATE_ACTIVE:
-                raise OSError(f"{self.name} is no longer available.")
-        return float(self._meter.GetPeakValue())
+        USB mode changed), which a caller must not read as silence."""
+        return self._reader.peak()
 
     def close(self):
-        self._dev = None
-        self._vol = None
-        if self._waker is not None:
-            self._waker.close()
-            self._waker = None
-        self._meter = None
-        try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
+        self._reader.close()
 
 
 def cue(kind: str, despite_off: bool) -> None:
@@ -509,7 +176,7 @@ HEALTHY = 0.126                  # about -18 dBFS
 
 
 def level_note(volume_db: float) -> str:
-    """A sentence about Windows' own level for this endpoint, or "" when it is close to unity.
+    """A sentence about the system's own level for this endpoint, or "" when it is close to unity.
 
     The desk's capture endpoints map Windows' percentage slider as measured: 0% is -96 dB, 50% is
     -1.08 dB, about 55% is unity, 75% is +7.67 dB, 100% is +30 dB. So the common advice of 75%
@@ -517,11 +184,11 @@ def level_note(volume_db: float) -> str:
     advice points at the app's dB control, which can land exactly on unity where the slider cannot.
     """
     if volume_db > 1.0:
-        return (f"Windows is adding {volume_db:.1f} dB to this input, so it will clip in Windows "
+        return (f"{OS_NAME} is adding {volume_db:.1f} dB to this input, so it will clip in {OS_NAME} "
                 f"before the desk does. Use Set it to no change below, then set your gain on the "
                 f"desk itself.")
     if volume_db < -3.0:
-        return (f"Windows is taking {abs(volume_db):.1f} dB off this input, so everything reads "
+        return (f"{OS_NAME} is taking {abs(volume_db):.1f} dB off this input, so everything reads "
                 f"lower here than the desk is really sending.")
     return ""
 
@@ -532,99 +199,76 @@ def level_note(volume_db: float) -> str:
 OFFERED_LEVEL_MIN_DB = -30.0
 OFFERED_LEVEL_MAX_DB = 30.0
 
-# For an endpoint Windows cannot level (RODE's Virtual Devices outputs): says where the level is.
-FIXED_LEVEL_NOTE = ("Windows cannot change this device's level. Use the channel's fader on the "
+# For an endpoint the system cannot level (RODE's Virtual Devices outputs): says where the level is.
+FIXED_LEVEL_NOTE = (f"{OS_NAME} cannot change this device's level. Use the channel's fader on the "
                     "desk, or this app's own level control.")
 
 
-def _volume_interface(endpoint_id: str):
-    """(device, IAudioEndpointVolume) for one endpoint. COM is per-thread, so the caller owns the
-    CoInitialize/CoUninitialize pair around this."""
-    enum = comtypes.client.CreateObject(CLSID_MMDeviceEnumerator, interface=IMMDeviceEnumerator)
-    dev = enum.GetDevice(endpoint_id)
-    vol = dev.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None) \
-             .QueryInterface(IAudioEndpointVolume)
-    return dev, vol
-
-
-def _offered_range(vol) -> tuple:
+def _offered_range(level_range) -> tuple:
     """(min dB, max dB, step, fixed) the control offers: the driver's range narrowed to the band
     above. Shared by the reader and the writer so they cannot disagree.
 
     `fixed` is a DEGENERATE range, not a missing one. RODE's Virtual Devices endpoint `System
-    (RØDECaster)` reports min 0, max 0, has no level at all, and refuses SetMasterVolumeLevel with
-    "the parameter is incorrect", so it gets no slider. A driver that reports no range at all is
-    unknown, and gets the band.
+    (RØDECaster)` reports min 0, max 0, has no level at all, and refuses a write with "the parameter
+    is incorrect", so it gets no slider. A driver that reports no range at all is unknown, and gets
+    the band.
     """
     lo, hi, step = OFFERED_LEVEL_MIN_DB, OFFERED_LEVEL_MAX_DB, 0.5
-    try:
-        r_lo, r_hi, r_step = vol.GetVolumeRange()
-        if float(r_hi) <= float(r_lo):
-            return float(r_lo), float(r_lo), 0.5, True
-        lo = max(OFFERED_LEVEL_MIN_DB, float(r_lo))
-        hi = min(OFFERED_LEVEL_MAX_DB, float(r_hi))
-        if float(r_step) > 0:
-            step = float(r_step)
-    except Exception:
-        pass                     # no range reported: the band is the answer
+    if level_range is None:
+        return lo, hi, step, False
+    r_lo, r_hi, r_step = level_range
+    if r_hi <= r_lo:
+        return r_lo, r_lo, 0.5, True
+    lo = max(OFFERED_LEVEL_MIN_DB, r_lo)
+    hi = min(OFFERED_LEVEL_MAX_DB, r_hi)
+    if r_step > 0:
+        step = r_step
     return lo, hi, step, False
 
 
 def endpoint_volume(endpoint_id: str) -> dict:
-    """Windows' own level for one endpoint, in dB (see `level_note` for why not percent), with
+    """The system's own level for one endpoint, in dB (see `level_note` for why not percent), with
     the range the control offers."""
-    with com_apartment():
-        try:
-            dev, vol = _volume_interface(endpoint_id)
-            db = float(vol.GetMasterVolumeLevel())
-            lo, hi, step, fixed = _offered_range(vol)
-            muted = False
-            try:
-                muted = bool(vol.GetMute())
-            except Exception:
-                pass
-            return {"ok": True, "id": endpoint_id, "name": _friendly_name(dev), "db": db,
-                    "min_db": lo, "max_db": hi, "step_db": step, "muted": muted,
-                    "fixed": fixed,
-                    "note": (FIXED_LEVEL_NOTE if fixed else level_note(db))}
-        except Exception as exc:
-            return {"ok": False,
-                    "message": f"Could not read the Windows level for that stream: {exc}"}
+    try:
+        got = read_level(endpoint_id)
+        lo, hi, step, fixed = _offered_range(got["range"])
+        return {"ok": True, "id": endpoint_id, "name": got["name"], "db": got["db"],
+                "min_db": lo, "max_db": hi, "step_db": step, "muted": got["muted"],
+                "fixed": fixed,
+                "note": (FIXED_LEVEL_NOTE if fixed else level_note(got["db"]))}
+    except Exception as exc:
+        return {"ok": False,
+                "message": f"Could not read the {OS_NAME} level for that stream: {exc}"}
 
 
 def set_endpoint_mute(endpoint_id: str, muted: bool) -> dict:
-    """Mute or unmute the endpoint in Windows, from a control the user pressed, and read it back.
-    A Windows-muted input reads exactly like a dead microphone."""
-    with com_apartment():
-        try:
-            write_guard.refuse_in_tests("change Windows audio")
-            _dev, vol = _volume_interface(endpoint_id)
-            vol.SetMute(1 if muted else 0, None)
-            got = bool(vol.GetMute())
-            return {"ok": got == bool(muted), "muted": got}
-        except Exception as exc:
-            return {"ok": False, "message": f"Could not change the Windows mute: {exc}"}
+    """Mute or unmute the endpoint in the system, from a control the user pressed, and read it
+    back. A muted input reads exactly like a dead microphone."""
+    try:
+        write_guard.refuse_in_tests(f"change {OS_NAME} audio")
+        got = write_mute(endpoint_id, bool(muted))
+        return {"ok": got == bool(muted), "muted": got}
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not change the {OS_NAME} mute: {exc}"}
 
 
 def set_endpoint_volume_db(endpoint_id: str, db: float) -> dict:
-    """Set Windows' own level for one endpoint, in dB, and read it back: the desk's `... Chat`
+    """Set the system's own level for one endpoint, in dB, from a control the user operates (it
+    changes what every application on the machine records), and read it back: the desk's `... Chat`
     input silently stays at -1.08 dB whatever is written, by dB or by scalar."""
-    with com_apartment():
-        try:
-            write_guard.refuse_in_tests("change Windows audio")
-            _dev, vol = _volume_interface(endpoint_id)
-            lo, hi, _step, fixed = _offered_range(vol)
-            if fixed:
-                # The driver's own refusal is "the parameter is incorrect", which names nothing
-                # to act on.
-                return {"ok": False, "fixed": True, "message": FIXED_LEVEL_NOTE}
-            want = max(lo, min(hi, float(db)))
-            vol.SetMasterVolumeLevel(c_float(want), None)
-            got = float(vol.GetMasterVolumeLevel())
-            return {"ok": abs(got - want) < 0.2, "db": got, "wanted": want,
-                    "note": level_note(got)}
-        except Exception as exc:
-            return {"ok": False, "message": f"Could not set the Windows level: {exc}"}
+    try:
+        write_guard.refuse_in_tests(f"change {OS_NAME} audio")
+        lo, hi, _step, fixed = _offered_range(read_level(endpoint_id)["range"])
+        if fixed:
+            # The driver's own refusal is "the parameter is incorrect", which names nothing
+            # to act on.
+            return {"ok": False, "fixed": True, "message": FIXED_LEVEL_NOTE}
+        want = max(lo, min(hi, float(db)))
+        got = write_level(endpoint_id, want)
+        return {"ok": abs(got - want) < 0.2, "db": got, "wanted": want,
+                "note": level_note(got)}
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not set the {OS_NAME} level: {exc}"}
 
 
 def dbfs(peak: float) -> str:
@@ -647,17 +291,17 @@ def describe(peak: float, active_fraction: float, name: str, wake_failed: bool =
     at = dbfs(peak)
     if muted:
         # First, because a muted endpoint reads 0 whatever the microphone is doing.
-        return f"{name}: MUTED IN WINDOWS. Nothing recorded from it will have any sound."
+        return f"{name}: MUTED IN {OS_NAME}. Nothing recorded from it will have any sound."
     if peak <= SILENCE and wake_failed:
-        return (f"{name}: no level can be read. Windows only reports an input's level while "
+        return (f"{name}: no level can be read. {OS_NAME} only reports an input's level while "
                 f"something is recording from it, and that could not be started here.")
     if peak <= SILENCE:
         return f"{name}: silent. Nothing is coming through."
     # Only the clip line is scaled by the ceiling; the bands below are judgements by ear.
     if peak >= clip_at * trusted_ceiling(ceiling):
-        # With Windows boosting the input, the desk's gain is the wrong knob.
+        # With the system boosting the input, the desk's gain is the wrong knob.
         if volume_db > 1.0:
-            return (f"{name}: CLIPPING at {at}, but Windows is adding {volume_db:.1f} dB to this "
+            return (f"{name}: CLIPPING at {at}, but {OS_NAME} is adding {volume_db:.1f} dB to this "
                     f"input. Use Set it to no change below before touching the desk.")
         return f"{name}: CLIPPING at {at}. Turn it down."
     if peak >= NEAR_CLIP:
@@ -674,13 +318,13 @@ def describe(peak: float, active_fraction: float, name: str, wake_failed: bool =
 def verdict(peak: float, active_fraction: float, volume_db: float = 0.0,
             ceiling: float = 1.0, clip_at: float = 0.99) -> str:
     """The advice at the end of a check: is this usable, and which control to turn if not (the
-    Windows level when Windows is boosting the input, otherwise the desk's gain). `describe`
+    system's level when the system is boosting the input, otherwise the desk's gain). `describe`
     reports; this decides."""
     boosted = volume_db > 1.0
-    down = (f"Turn down the Windows level above, which is adding {volume_db:.1f} dB to this input"
+    down = (f"Turn down the {OS_NAME} level above, which is adding {volume_db:.1f} dB to this input"
             if boosted else "Turn the gain down on the desk")
     up = ("Turn up the gain on the desk" if not boosted
-          else "Turn up the gain on the desk rather than the Windows level")
+          else f"Turn up the gain on the desk rather than the {OS_NAME} level")
     if peak <= SILENCE:
         return "Nothing came through at all."
     if peak >= clip_at * trusted_ceiling(ceiling):
@@ -716,7 +360,7 @@ class Watcher:
         # hears one channel through a temporary post-fader Chat mix. scale is that cross-point's
         # level: dividing by it puts every reading, and the clip test, back in channel terms, as
         # auto gain does; a microphone clips in the preamp, ahead of the fader. label is the name
-        # spoken in place of the Windows endpoint's.
+        # spoken in place of the system endpoint's.
         self.scale = max(0.05, float(scale or 1.0))
         self.label = str(label or "")
         self.clip_sound = bool(clip_sound)

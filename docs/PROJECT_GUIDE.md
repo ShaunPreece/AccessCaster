@@ -2402,8 +2402,8 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **Default to a CAPTURE endpoint.** With no stream chosen the meter defaulted to the PLAYBACK
   endpoint, so it measured this PC's own screen reader instead of the mic. "Microphone (...
   Main Stereo)" is the desk's OUTPUT mix; label devices by direction.
-- **A capture endpoint reads 0.0 until something opens it.** `meters._EngineWaker` is that something,
-  started by every `meters.Meter` on a capture endpoint; holding the stream open with `ffmpeg -f
+- **A capture endpoint reads 0.0 until something opens it.** `win/meters._EngineWaker` is that something,
+  started by every `win/meters.EndpointReader` on a capture endpoint; holding the stream open with `ffmpeg -f
   dshow` reads 42 percent where a bare meter reads 0.0. Over Remote Desktop no desk endpoint exists,
   so a waker that never starts is invisible there.
 - **The clip threshold must be scaled by an INPUT's LIVE volume ceiling, and never an output's.**
@@ -2427,7 +2427,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **`meters.Watcher` must record a mid-loop exception.** It once died silently, so a broken run was
   summarised as a QUIET CHANNEL. A run is in progress if EITHER the watcher or the isolation exists,
   and each run's end-timer carries its run number.
-- **`meters.Meter.peak` ASKS ITS ENDPOINT'S STATE EVERY `PRESENT_CHECK_S` AND RAISES ONCE IT IS
+- **`win/meters.EndpointReader.peak` ASKS ITS ENDPOINT'S STATE EVERY `PRESENT_CHECK_S` AND RAISES ONCE IT IS
   GONE.** The endpoint meter does not raise when Windows removes the endpoint (a USB mode change
   re-enumerates the desk): it reads 0 for as long as it is gone. Without the check a `Watcher` sits
   on the dead endpoint, and the clip warning's supervisor, which reopens only a watcher that has

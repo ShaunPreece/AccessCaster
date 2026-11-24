@@ -43,7 +43,7 @@ def main() -> int:
     ap.add_argument("--speak", action="store_true", help="speak the warnings too")
     args = ap.parse_args()
 
-    if meters._remote_session():
+    if meters.remote_session():
         print("!! THIS IS A REMOTE DESKTOP SESSION.")
         print("!! The desk's audio streams belong to the console session and are not visible here.")
         print("!! Run this again while logged in AT the computer. Continuing anyway, so you can")
@@ -111,7 +111,7 @@ def main() -> int:
         print(f"  ABOUT THAT LEVEL:  {note}")
     if w.wake_failed:
         print("\n  THE ENGINE WAKER FAILED on this input, so 0.0 means nothing either way: an input")
-        print("  nothing captures from reports no level. See meters._EngineWaker.")
+        print("  nothing captures from reports no level. See win/meters._EngineWaker.")
         return 1
     if peak_seen <= meters.SILENCE:
         print("\n  NOTHING WAS HEARD. Either nothing was playing on that stream, or it is not the")
