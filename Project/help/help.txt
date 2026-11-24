@@ -15,7 +15,7 @@ What you can do from the app:
 - All of the desk's processing on every channel, with presets, plus voice effects and the master output's processing.
 - Fader assignment, output routing and monitor mixes, with presets you can save and recall.
 - What the desk and this computer send each other over USB, including four separate channels from this computer.
-- The recorder: start, pause, stop and markers, what gets recorded and in what format, and deleting, ejecting or erasing.
+- The recorder: start, pause, stop and markers, what gets recorded and in what format, deleting, ejecting or erasing, and copying recordings off the memory card.
 - SMART pads: sounds, voice effects, mixer and MIDI pads, with trimming, fades and your own custom voice effects.
 - CallMe: host, answer, make and end calls, with the call's quality and your plan's minutes.
 - Backups, restores, and a factory reset without the touchscreen setup.
@@ -40,7 +40,7 @@ Some things still need the desk's touchscreen, for now:
 
 Worth knowing:
 
-- Recordings can't be copied off over the USB cable yet. Take the card or drive out and plug it into your computer.
+- Recordings on a USB drive can't be copied off over the USB cable. Take the drive out and plug it into your computer. A Pro 2's memory card can be opened on this computer instead, on Recording, Recordings.
 - A backup doesn't hold your Bluetooth pairings, wifi networks or wireless mic pairing, so after a factory reset you'll need to set those up again.
 - After a reset or a restore, the desk can sometimes stop responding. Unplugging the USB cable and plugging it back in usually brings it back; if it doesn't, switch the desk off and on again. Nothing is lost. Troubleshooting has the details.
 
@@ -260,7 +260,10 @@ The separate tracks without the desk's processing, so you can do that work yours
 Your mics can pick up spoken announcements wherever they play, so this pauses them during a take. Turn it off if they go to headphones the mics cannot hear. Your screen reader is separate: if it speaks through the desk, it goes into the recording.
 
 * Recordings
-What is on the card or drive, newest first, with the date and length. You can delete one, which cannot be undone. To copy recordings off, take the card or drive out and plug it into a computer, since the desk does not make them available over USB.
+What is on the card or drive, newest first, with the date and length. You can delete one, which cannot be undone.
+
+* Open the card on this computer
+On a Pro 2, this hands the desk's memory card to this computer as a drive, the way RODE's app does for Transfer Recordings, and opens File Explorer on it: one folder per recording, holding the mix and each track as WAV files, ready to copy. While the card is open here the desk cannot record to it and lists no recordings, so the same button, now named Give the card back to the desk, hands it back when you have finished copying, and the list returns. Stop any recording first. A USB drive in the desk's second port is not handed over this way: take it out and plug it into a computer.
 
 * Card and drive
 Eject a card or drive before pulling it out, so nothing is lost mid-write; Reconnect puts it back in use without unplugging it. Erase deletes everything on it.

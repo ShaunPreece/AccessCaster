@@ -1,10 +1,12 @@
 """
 AccessCaster - the Recording page: the recorder's transport, the recordings on the card or drive,
-and ejecting and erasing the card or drive. The protocol side is recorder.py; this is the app side.
+ejecting and erasing the card or drive, and opening the memory card on this computer. The protocol
+side is recorder.py; this is the app side.
 """
 
 from __future__ import annotations
 
+import os
 import time
 
 import announcer
@@ -12,6 +14,7 @@ import desk_access
 import desk_live
 import devices
 import diagnostics
+import folders
 import model_tree
 import rcp_read
 import rcp_transfer
@@ -58,8 +61,12 @@ def _state_changed(was, now) -> None:
     WHAT IS SAID COMES FROM THE TRANSITION, NOT FROM `now` ALONE (recorder.spoken_change), which is
     what tells a drive being plugged in apart from a recording stopping. The SUSPENSION decisions
     are keyed on the new state alone: a take is over once the desk leaves RECORDING and PAUSED,
-    whatever the reason it left."""
-    ours = announcer.is_self_echo(("record",))
+    whatever the reason it left.
+
+    THE CARD HANDED TO THIS COMPUTER AND TAKEN BACK (action_card_to_computer) moves the state the
+    way a card pulled out and put in does, seconds after the write, and is this app's own doing:
+    the page says it, so it is not spoken here as storage leaving."""
+    ours = announcer.is_self_echo(("record",)) or _card["moving"]
     # The last destination we knew about, which on a REMOVAL is the thing that just left. Best
     # effort by design: it is empty until a full page read has happened, and spoken_change falls
     # back to naming no medium at all rather than guessing one.
@@ -156,6 +163,7 @@ def _payload(blob: bytes) -> dict:
     out["can_delete"] = refused is None
     out["delete_note"] = (refused or {}).get("message", "")
     out["storage_writable"] = "storage_write" in dev.caps
+    out["card"] = _card_share(blob)
     return out
 
 
@@ -182,7 +190,7 @@ def read() -> dict:
 # Kept so the CHEAP read can answer in full sentences too. `read_live` costs no device
 # read at all (it is answered from the push listener), and without this it could only say the bare
 # state - so "Recording status" would give you less than arriving on the page did.
-_context = {"where": "", "room": "", "low": None}
+_context = {"where": "", "room": "", "low": None, "card_out": False}
 
 
 def _note_context(payload: dict) -> None:
@@ -190,6 +198,7 @@ def _note_context(payload: dict) -> None:
     _context["where"] = dest["spoken"] if dest else ""
     _context["room"] = (payload.get("room") or {}).get("words") or ""
     _context["low"] = dest if (dest and dest.get("low")) else None
+    _context["card_out"] = bool((payload.get("card") or {}).get("open"))
 
 
 def _sentence(state, elapsed: str = "") -> str:
@@ -225,6 +234,8 @@ def _sentence(state, elapsed: str = "") -> str:
                           f"about {low['free_mb']} megabytes.")
         return f"Ready to record{where}.{room_left}"
     if state == recorder.NO_DESTINATION:
+        if _context["card_out"]:
+            return CARD_OUT_SENTENCE
         return ("The desk has nowhere to record to. Put a memory card in, or a USB drive in the "
                 "second USB port, and this will say Ready.")
     return "The desk did not report a recording state."
@@ -532,6 +543,157 @@ def action_storage_erase(index: int) -> dict:
         return _storage_reply(blob, False, f"The erase was sent, but the {vol['spoken']} does not "
                                            f"read as empty yet.")
     return _storage_reply(blob, True, f"Erased the {vol['spoken']}. {now['free_mb']} MB free.")
+
+
+# ----------------------------------------------------------------------------
+# THE MEMORY CARD ON THIS COMPUTER (recorder.set_card_transfer): what RODE's app calls Transfer
+# Recordings. Opening it waits for Windows to show the card and puts the user in its recordings
+# folder. Giving it back has Windows let go of the volume first, then reads the recordings back.
+# A take needs the card in the desk, and the pad storage is the same property at another value, so
+# both refuse it.
+_CARD_WAIT_S = 30.0         # the card shows in Windows about 4 s after the write
+_CARD_BACK_READS = 6        # one a second: the desk lists its recordings about 3 s after
+CARD_OUT_SENTENCE = ("The memory card is open on this computer, so the desk has nowhere to record "
+                     "to. Give the card back to the desk and this will say Ready.")
+# The drive the card is on once seen ("E:"), and whether a hand-over is in flight, which
+# `_state_changed` asks.
+_card = {"drive": "", "moving": False}
+
+
+def _card_gate():
+    return desk_access.cap_gate("card_transfer", lambda name:
+                     f"AccessCaster cannot open the {name}'s memory card on this computer.",
+                     confirmed=True)
+
+
+def _card_volume(blob: bytes):
+    """The memory card's slot in recorder.read_volumes, or None."""
+    return next((v for v in recorder.read_volumes(blob) if v["index"] == 0), None)
+
+
+def _card_share(blob: bytes) -> dict:
+    """The card as the page needs it: whether it is open on this computer, as which drive, and why
+    this desk cannot do it when it cannot. Read on any desk: a card RODE's app left out counts."""
+    is_open = recorder.card_out(blob)
+    rcp_transfer.note_card_out(is_open)
+    if not is_open:
+        _card["drive"] = ""
+    elif not _card["drive"]:
+        _card["drive"] = next(iter(rcp_transfer.desk_volume_roots()), "")[:2]
+    return {"open": is_open, "drive": _card["drive"],
+            "note": (_card_gate() or {}).get("message", "")}
+
+
+def _await_card_volume(root: str = "") -> str:
+    """Wait, at most `_CARD_WAIT_S`, for the desk's drive to hold a volume, and return its root; or,
+    given a `root`, for that volume to go, and return "" once it has."""
+    deadline = time.monotonic() + _CARD_WAIT_S
+    while True:
+        roots = rcp_transfer.desk_volume_roots()
+        if not root and roots:
+            return roots[0]
+        if root and root not in roots:
+            return ""
+        if time.monotonic() >= deadline:
+            return root
+        time.sleep(0.5)
+
+
+def action_card_to_computer(on: bool) -> dict:
+    """Open the memory card on this computer as a drive (`on`), or give it back to the desk.
+
+    THE DESK IS READ BACK BOTH WAYS, and the drive is waited for: the write is one property and
+    says nothing about whether a card left or came back."""
+    gate = _card_gate()
+    if gate is not None:
+        return gate
+    try:
+        with desk_access.hid_lock:
+            blob = rcp_read.read_model_stable(fresh=True)
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not read the desk: {exc}"}
+    _card["moving"] = True
+    try:
+        return _open_card(blob) if on else _return_card(blob)
+    finally:
+        _card["moving"] = False
+
+
+def _open_card(blob: bytes) -> dict:
+    """Hand the card over, wait for Windows to show it, and open its recordings in File Explorer
+    with the focus in it. Refuses while a take runs, with no card in, and while the desk is in
+    transfer mode for its pad storage."""
+    mode = recorder.transfer_mode(blob)
+    if mode == recorder.CARD_TRANSFER:
+        drive = _card_share(blob)["drive"]
+        return _storage_reply(blob, True, "The memory card is already open on this computer"
+                                          + (f" as drive {drive}." if drive else "."))
+    if mode not in (0, None) or rcp_transfer.transfer_active():
+        return {"ok": False, "message": "The desk is in transfer mode for its SMART pad sounds. "
+                                        "Try again when that has finished."}
+    if recorder.read_state(blob) in (recorder.RECORDING, recorder.PAUSED):
+        return {"ok": False, "message": "Stop the recording first. The card cannot leave the desk "
+                                        "during a take."}
+    card = _card_volume(blob)
+    if card and card["ejected"]:
+        return {"ok": False, "message": "The memory card is ejected. Reconnect it on Card and "
+                                        "drive first."}
+    if not card or not card["inserted"]:
+        return {"ok": False, "message": "There is no memory card in the desk."}
+    try:
+        with desk_access.hid_lock:
+            recorder.set_card_transfer(True)
+        root = _await_card_volume()
+        with desk_access.hid_lock:
+            blob = rcp_read.read_model_stable(fresh=True)
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not open the card on this computer: {exc}"}
+    _card["drive"] = root[:2]
+    if not root:
+        return _storage_reply(blob, False, f"The desk let go of the card, but Windows did not "
+                                           f"show it within {int(_CARD_WAIT_S)} seconds. Give it "
+                                           f"back to the desk and try again.")
+    takes = os.path.join(root, recorder.CARD_FOLDER)
+    found = os.path.isdir(takes)
+    opened = folders.open_folder_reply(takes if found else root, "The card")
+    where = (f" {opened['message']}" if not opened["ok"] else
+             " File Explorer is open on its recordings, one folder each." if found else
+             " File Explorer is open on it.")
+    return _storage_reply(blob, True, f"The memory card is open on this computer as drive "
+                                      f"{root[:2]}.{where} The desk cannot record to it until you "
+                                      f"give it back.")
+
+
+def _return_card(blob: bytes) -> dict:
+    """Have Windows let go of the card's volume, take the card back, and read the recordings."""
+    if not recorder.card_out(blob):
+        return _storage_reply(blob, True, "The memory card is already in the desk.")
+    drive = _card_share(blob)["drive"]
+    root = f"{drive}\\" if drive else ""
+    if root:
+        # Before the desk takes the media away, for the reason the pad storage is dismounted.
+        rcp_transfer.dismount_volume(root)
+    try:
+        with desk_access.hid_lock:
+            recorder.set_card_transfer(False)
+        if root:
+            _await_card_volume(root)
+        for _ in range(_CARD_BACK_READS):
+            time.sleep(1.0)
+            with desk_access.hid_lock:
+                blob = rcp_read.read_model_stable(fresh=True)
+            if not recorder.card_out(blob) and (_card_volume(blob) or {}).get("inserted"):
+                break
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not give the card back to the desk: {exc}"}
+    if recorder.card_out(blob):
+        return _storage_reply(blob, False, "The desk still reports the card as open on this "
+                                           "computer.")
+    if not (_card_volume(blob) or {}).get("inserted"):
+        return _storage_reply(blob, False, "The desk has taken the card slot back, but reports no "
+                                           "card in it.")
+    count = wording.count(len(recorder.read_recordings(blob)), "recording")
+    return _storage_reply(blob, True, f"The memory card is back in the desk, with {count} on it.")
 
 
 # ----------------------------------------------------------------------------

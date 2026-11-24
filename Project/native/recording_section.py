@@ -32,7 +32,14 @@ USB_POINTER = ("This is what the desk writes to its card or drive. What it sends
                "over USB is a separate setting, on Routing, under Master Mix.")
 MUTE_HINT = ("If off, announcements may be heard in the recording, depending on where you have "
              "them routed.")
-LIST_HINT = "Newest first. To copy them off, take the card or drive to a computer."
+LIST_HINT = ("Newest first. To copy them off, open the card on this computer below, or take the "
+             "card or drive to a computer.")
+OPEN_CARD, RETURN_CARD = "Open the card on this computer", "Give the card back to the desk"
+CARD_HINT = ("Opens the memory card as a drive on this computer, in File Explorer, with a folder "
+             "for each recording. The desk cannot record to the card until you give it back with "
+             "this same button.")
+CARD_OUT = ("The memory card is open on this computer. Give it back to the desk first, on "
+            "Recordings.")
 STORAGE_HINT = "Eject before pulling a card or drive out. Erase deletes everything on it."
 NO_STORAGE_WRITE = "AccessCaster cannot eject or erase storage on this desk."
 RUNNING = (recorder.RECORDING, recorder.PAUSED)
@@ -58,6 +65,11 @@ def volume_label(volume):
     if not volume.get("inserted"):
         return f"{volume['label']}: empty"
     return f"{volume['label']}: {volume['free_mb']} MB free of {volume['capacity_mb']} MB"
+
+
+def card_open(data):
+    """Whether the memory card is handed to this computer (`recording.action_card_to_computer`)."""
+    return bool((data.get("card") or {}).get("open"))
 
 
 def _with_sentence(action, *args):
@@ -289,7 +301,7 @@ class RecorderPage(wx.Panel):
     def _on_transport(self, event):
         state = self.section.state
         if state == recorder.NO_DESTINATION:
-            self.frame.say(NOWHERE)
+            self.frame.say(CARD_OUT if card_open(self.section.data) else NOWHERE)
             return
         self.section.command(event.GetEventObject(), recording.action_record,
                              "stop" if state in RUNNING else "start")
@@ -308,7 +320,8 @@ class RecorderPage(wx.Panel):
 
 
 class RecordingsPage(wx.Panel):
-    """The recordings on the card or drive, and deleting one."""
+    """The recordings on the card or drive, deleting one, and the memory card opened on this
+    computer to copy them off."""
 
     def __init__(self, section):
         super().__init__(section.frame.host)
@@ -325,14 +338,28 @@ class RecordingsPage(wx.Panel):
                                    "are asked to confirm.")
         self.delete.Bind(wx.EVT_BUTTON, self._on_delete)
         sizer.Add(self.delete, 0, wx.ALL, gap(6))
+        # ONE BUTTON WHOSE LABEL FOLLOWS WHERE THE CARD IS, as the transport's do: renamed under the
+        # focus it is read out, which is the confirmation of a card given back. Opening it moves
+        # the focus to File Explorer instead.
+        self.card = wx.Button(parent, label=OPEN_CARD)
+        a11y.describe(self.card, CARD_HINT)
+        self.card.Bind(wx.EVT_BUTTON, self._on_card)
+        sizer.Add(self.card, 0, wx.ALL, gap(6))
 
     def show(self):
         data = self.section.data
         chosen = self._chosen()
         uid = chosen["uid"] if chosen else None
         self.takes = data.get("recordings") or []
+        label = RETURN_CARD if card_open(data) else OPEN_CARD
+        if self.card.GetLabel() != label:
+            self.card.SetLabel(label)
         if self.takes:
             labels = [recording_label(take) for take in self.takes]
+        elif card_open(data):
+            drive = data["card"].get("drive")
+            labels = ["Nothing to list: the memory card is open on this computer"
+                      + (f", as drive {drive}." if drive else ".")]
         elif data.get("state") == recorder.NO_DESTINATION:
             labels = ["Nothing to list: there is no card or drive in the desk."]
         else:
@@ -360,6 +387,18 @@ class RecordingsPage(wx.Panel):
             return
         self.section.command(self.delete, recording.action_delete_recording, take["uid"],
                              working="Deleting, please wait.", reread=True)
+
+    def _on_card(self, _event):
+        data = self.section.data
+        opening = not card_open(data)
+        refusal = (data.get("card") or {}).get("note") or (
+            "Stop the recording first." if opening and self.section.state in RUNNING else None)
+        if refusal:
+            self.frame.say(refusal)
+            return
+        self.section.command(self.card, recording.action_card_to_computer, opening,
+                             working=("Opening the card, please wait." if opening else
+                                      "Giving the card back, please wait."), reread=True)
 
 
 class StoragePage(wx.Panel):

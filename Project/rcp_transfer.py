@@ -684,9 +684,31 @@ class transfer_session:
         return False
 
 
+# THE MEMORY CARD HANDED TO THIS COMPUTER (recorder.set_card_transfer) is the same property at
+# another value, so entering pad transfer mode would take the card's drive away from Windows in the
+# middle of whatever is being copied off it. Held as last written, and as each read of the recorder
+# finds it (recording._payload), so a card left out by an earlier run of the app counts too.
+_card_out = False
+CARD_OUT_REFUSAL = ("The memory card is open on this computer. Give it back to the desk on the "
+                    "Recording page first.")
+
+
+def note_card_out(on: bool) -> None:
+    """Record whether the memory card is handed to this computer."""
+    global _card_out
+    _card_out = bool(on)
+
+
+def card_out() -> bool:
+    """Whether the memory card is handed to this computer, as last written or read."""
+    return _card_out
+
+
 def _set_transfer_mode_raw(on: bool) -> int:
     """Enter/exit regardless of any hold. Only the session itself should use this."""
     global _session_pad_root, _transfer_on
+    if on and _card_out:
+        raise RuntimeError(CARD_OUT_REFUSAL)
     _transfer_on = on
     if not on:
         roots = ([_session_pad_root] if _session_pad_root
@@ -699,7 +721,10 @@ def _set_transfer_mode_raw(on: bool) -> int:
     # re-presents a USB mass-storage gadget, so it is the one write whose
     # position in the timeline is worth being able to find without decoding anything.
     diagnostics.event("transfer.enter" if on else "transfer.exit")
-    return send_record(rec)
+    n = send_record(rec)
+    if not on:
+        note_card_out(False)     # 0 takes the card back as well
+    return n
 
 
 def transfer_active() -> bool:
@@ -898,6 +923,23 @@ def _pad_read_error(root: str) -> str:
 def _drive_roots() -> list[str]:
     """Every drive root from D to Z. A and B are floppy letters and C is the system drive."""
     return [f"{letter}:\\" for letter in string.ascii_uppercase[3:]]
+
+
+def desk_volume_roots() -> list[str]:
+    """The drive roots on the desk's own USB device that hold a volume now, in letter order.
+
+    The desk's letter stays assigned with nothing behind it, size 0, which is not a volume. What
+    the volume IS depends on what the desk was last asked for: its pad storage, or the memory card
+    (recorder.set_card_transfer)."""
+    roots = []
+    for root in sorted(desk_drives.on_desk(_drive_roots())):
+        try:
+            with quiet_drive_errors():
+                if shutil.disk_usage(root).total > 0:
+                    roots.append(root)
+        except OSError:
+            pass
+    return roots
 
 
 # What `_volume_state` finds on a desk drive.

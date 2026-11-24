@@ -783,10 +783,12 @@ PRO2 = DeviceModel(
     # "callme": hosting and answering a CallMe call, on the SIPCALLING node found by walking the
     # tree. Heard both ways with a browser guest.
     # "storage_write": ejecting and erasing the card or drive, on the STORAGEVOLUME nodes.
+    # "card_transfer": the memory card handed to the computer as a drive and taken back,
+    # `transferModeType` 1 and 0 on SYSTEM, which is what RODE's app sends for Transfer Recordings.
     caps=frozenset({"input_mic_write", "matrix_read", "matrix_write", "processing",
                     "channel_read", "output_write", "pad_write", "fader_write", "chain_follow",
                     "level_write", "unit_settings", "recorder", "network_write", "shows",
-                    "stereo_link", "callme", "storage_write"}),
+                    "stereo_link", "callme", "storage_write", "card_transfer"}),
     ui_channels=PRO2_UI_CHANNELS,
     expanded_ui_channels=EXPANDED_UI_CHANNELS,
     pad=PadSpec(pads_per_bank=8),   # 8 pads/bank x 8 banks = 64 slots; system pads 56-63
@@ -794,11 +796,12 @@ PRO2 = DeviceModel(
 )
 
 # --- Duo ----------------------------------------------------------------------------------------
-# Every Pro II cap except storage_write, which waits for a Duo with a card or drive in it. A cap
-# needs the TREE, then the ENGINE: the property resolves to a node of the right block on a live
-# Duo, then a write makes the desk do something we did not send. AN ENGINE ANSWERING PROVES AN
-# ADDRESS IS LIVE, NEVER THAT A FEATURE EXISTS ON THIS DESK: the engine's model is device-agnostic
-# and answers for Mic 4, hardware a Duo does not have, exactly as for Mic 2 (PROJECT_GUIDE part 2).
+# Every Pro II cap except storage_write and card_transfer, which wait for a Duo with a card or drive
+# in it. A cap needs the TREE, then the ENGINE: the property resolves to a node of the right block
+# on a live Duo, then a write makes the desk do something we did not send. AN ENGINE ANSWERING
+# PROVES AN ADDRESS IS LIVE, NEVER THAT A FEATURE EXISTS ON THIS DESK: the engine's model is
+# device-agnostic and answers for Mic 4, hardware a Duo does not have, exactly as for Mic 2
+# (PROJECT_GUIDE part 2).
 # STRAYS PERSIST ACROSS A POWER CYCLE here too, and only a factory reset clears them: one shifts
 # inputMicrophoneGain and channelInputSource +1, mis-targeting every read and processing write.
 DUO = DeviceModel(

@@ -218,8 +218,8 @@ Say these plainly, because each one cost real hardware time to settle:
   their values there; they hold unpopulated defaults. The official app shows moving meters, so the
   data goes somewhere else and finding it is a capture job. We read the desk's USB audio streams
   through Windows instead, which is close but is not the desk's own meter.
-- **The recordings drive.** The desk only ever binds its pad image or its update image to the USB
-  gadget, never the recordings partition, so no transfer mode makes recordings appear.
+- **A USB drive of recordings.** The memory card can be handed to the computer (`transferModeType`
+  1, part 2); a drive in the desk's second USB port has not been, and has to be carried over.
 - **A static IP.** `staticIpSet` accepts a write, but `ipAddress`, `subnetMask` and `gateway` are
   read-only REPORTS of what the interface currently has, so there is nothing to express the address
   you want with. A flag with no operands.
@@ -462,7 +462,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   `padRecordStateRequest` and `padRecordIdx` (PADRECORDER stores and never acts; measured while a
   stray existed and not re-proved, because PADRECORDER is not to be probed again: see "Recording to
   a pad from the touchscreen reboots the desk"),
-  `storageVolumeTransfer` (mounts nothing at any transferModeType 0-8),
+  `storageVolumeTransfer` (mounts nothing at any transferModeType 0-8, with no card in the desk),
   `staticIpSet` (a flag with no operands; the address fields are read-only reports),
   `systemDateTimezone` (applied by the touchscreen, not the engine).
 - **THE SIX "UNCLAIMED" READABLE PROPERTIES ARE PLAIN STORAGE, AND THE QUESTION IS CLOSED**
@@ -3329,9 +3329,29 @@ shared one; a new copy is how they drifted apart the first time.
 
 - **Import `DevTools/_bootstrap.py` FIRST in any new DevTools script** that touches the Project
   modules. 19 of 48 scripts once could not run as documented without it.
-- **`transferModeType` = 2 MOUNTS PAD STORAGE ONLY.** Not the card, not the USB drive: F:, 5033 MB,
-  a `\pads` folder. Value 1 mounts nothing. Measured 29th August 2026, so do not reach for
-  transfer mode to get at recordings.
+- **`transferModeType` = 2 MOUNTS PAD STORAGE; 1 MOUNTS THE MEMORY CARD, WHEN ONE IS IN.** 2 gives
+  F:, 5033 MB, a `\pads` folder, and never the card or the USB drive (measured 29th August 2026).
+  1 mounted nothing in that session because no card was in the desk. With a card in, 1 is exactly
+  what RODE's app sends for Transfer Recordings, and nothing else: measured 20th October 2026 on a
+  second Pro II, fw 1.7.6, by reading the desk before, during and after the app's transfer, and
+  the same record sent from our own code did the same. The desk lets go of the card
+  (`recordState` 3, the recordings list empties, `storageVolumeState` for slot 0 reads
+  `0|0|1|0|0`), about 4 s later Windows shows the whole card as an exFAT drive, and 0 takes it back
+  in about 3 s with the recordings list as it was. The recordings sit in
+  `\RODECaster\<n> - <date>\`: `Stereo Mix.wav`, one `Track<n>-<source>.wav` per track and a
+  `Meta.xml`. Only the card was tried: whether 1 also hands over a USB drive in the second port,
+  and what a Duo does, are open, so the cap (`card_transfer`) is the Pro II's alone.
+  - **THE APP SIDE IS `recording.action_card_to_computer`.** It refuses during a take, with no card
+    in and while the pad storage holds transfer mode, waits for the volume on the desk's own drive
+    (`rcp_transfer.desk_volume_roots`) and opens its `\RODECaster` folder; giving it back
+    dismounts the volume first, as leaving pad transfer mode does, and reads the recordings back.
+  - **THE CARD AND THE PAD STORAGE ARE ONE PROPERTY**, so entering pad transfer mode with the card
+    out would take the card's drive from Windows mid-copy. `rcp_transfer._set_transfer_mode_raw`
+    refuses while `card_out()` holds, which every read of the recorder keeps current.
+  - **`recordState` MOVES TO 3 AND BACK TO 0 FOR IT**, as for a card pulled out and put back, and
+    the way back takes seconds, longer than the self-echo window. `recording._state_changed` stays
+    quiet while a hand-over is in flight (`_card["moving"]`) and the page's button says it. When
+    the pushes arrive has not been timed.
 - **THE DESK NEVER PUSHES A `STORAGEVOLUME` RECORD.** Neither a record start/stop nor an unplug and
   replug of the drive produces one; you get `recordState` (0x03) and `lastRecordingID` (0x0F) and
   nothing else. So `state_observatory.py listen` cannot learn that block's address, however long

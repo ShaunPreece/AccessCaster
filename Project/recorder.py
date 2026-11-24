@@ -525,6 +525,43 @@ def delete_recording(uid: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# THE CARD ON THE COMPUTER: what RODE's app calls Transfer Recordings.
+#
+# `transferModeType` = 1 on SYSTEM, WITH A CARD IN, hands the whole memory card to the host as a
+# USB drive, and 0 takes it back. It is the one record RODE's app sends for it. The desk lets go
+# of the card (`recordState` reads 3 and its recordings list empties), a few seconds later Windows
+# shows the card as an exFAT drive with the takes in `\RODECaster`, one folder each holding
+# `Stereo Mix.wav`, a WAV per track and `Meta.xml`, and 0 puts the list back as it was. With no
+# card in, 1 mounts nothing. 2 is the pad storage (rcp_transfer.set_transfer_mode): one property
+# holds both, so the card and the pad storage are never on the computer together.
+CARD_TRANSFER = 1
+CARD_FOLDER = "RODECaster"
+
+
+def build_card_transfer(on: bool) -> bytes:
+    """The record that hands the card to the host (True) or takes it back (False)."""
+    return rcp_transfer.build_at(rcp_transfer.SYSTEM, "transferModeType", "int",
+                                 CARD_TRANSFER if on else 0)
+
+
+def set_card_transfer(on: bool) -> None:
+    """Send it. VERIFIES NOTHING: the caller watches for the drive and reads the desk back
+    (recording.action_card_to_computer)."""
+    rcp_transfer.send_record(build_card_transfer(on))
+    rcp_transfer.note_card_out(on)
+
+
+def transfer_mode(blob: bytes):
+    """`transferModeType` on SYSTEM, the node its write goes to, or None."""
+    return rcp_read.keyed_value(blob, rcp_transfer.SYSTEM, "transferModeType", kind="int")
+
+
+def card_out(blob: bytes) -> bool:
+    """Whether the dump says the memory card is handed to the host."""
+    return transfer_mode(blob) == CARD_TRANSFER
+
+
+# ---------------------------------------------------------------------------
 # The Watcher: what the unit is doing, live, for free.
 
 class Watcher:

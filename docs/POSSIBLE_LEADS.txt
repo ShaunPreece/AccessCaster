@@ -107,18 +107,22 @@ Expect roughly 1 in 5, so three clean runs prove nothing: ten leaves about an 11
 of seeing nothing by luck alone.
 
 
-LEAD 4: can anything make the desk expose its recordings over USB?
-------------------------------------------------------------------
+LEAD 4: does the desk hand a USB DRIVE of recordings to the computer, and does a Duo hand over its card?
+--------------------------------------------------------------------------------------------------------
 
-The recordings drive does not mount over the desk's USB cable. `storageVolumeTransfer`
-mounts nothing at any `transferModeType` from 0 to 8.
+A Pro 2's memory card does mount over the desk's USB cable: `transferModeType` 1 with a
+card in, which is what RODE's app sends for Transfer Recordings (PROJECT_GUIDE part 2).
+It was measured with a card and nothing in the second USB port, on a Pro 2 only. With no
+card in, 1 mounts nothing, and `storageVolumeTransfer` mounts nothing at any
+`transferModeType` from 0 to 8.
 
-The firmware names the mechanism: storage is exposed by binding a FILE to a USB gadget
-LUN (`.../mass_storage.usb0/lun.0/file`), and the engine only ever binds the pad image or
-the update image - never the recordings partition. So the question is no longer "which
-transfer mode" but "can anything we send make it bind a different file".
+**What to run.** With a USB drive of recordings in the second port and no card, write
+`transferModeType` 1 on SYSTEM and see whether a drive appears in Windows within ten
+seconds; write 0 to take it back. Then the same with both in. On a Duo, the same with a
+card. Stop any recording first, and safely remove the drive in Windows before writing 0.
 
-"You have to unplug the drive" is an acceptable answer. We just have not proved it.
+"You have to unplug the drive" is an acceptable answer for a USB drive. We just have not
+proved it.
 
 
 LEAD 5: wireless mic telemetry has never seen a real transmitter
