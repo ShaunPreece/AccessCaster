@@ -45,7 +45,7 @@ size = os.path.getsize(zip_path)
 print(f"  ok   downloaded {size} bytes in {time.monotonic() - at:.1f}s")
 check("it is a plausible size for one MSI, not a web page", 200_000 < size < 20_000_000, True)
 
-msi = di._extract_msi(zip_path, folder, steps.append)
+msi = di._extract_installer(zip_path, folder, steps.append)
 print(f"  ok   one MSI inside: {os.path.basename(msi)!r}")
 
 subject = di.verify_signature(msi)

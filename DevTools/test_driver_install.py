@@ -15,6 +15,7 @@ import os
 import re
 import tempfile
 import zipfile
+from types import SimpleNamespace
 
 import _bootstrap  # puts Project/ on sys.path
 import _testkit
@@ -51,53 +52,53 @@ def zip_with(names):
 
 
 print("THE ARCHIVE: what it is allowed to contain")
-refuses("an archive with no MSI in it is refused",
-        lambda: di._extract_msi(zip_with(["readme.txt"]), tmp), "did not contain")
+ext = di.INSTALLER_SUFFIX
+refuses("an archive with no installer in it is refused",
+        lambda: di._extract_installer(zip_with(["readme.txt"]), tmp), "did not contain")
 refuses("and so is one with TWO, rather than guessing which to run",
-        lambda: di._extract_msi(zip_with(["a.msi", "b.msi"]), tmp), "more than one")
+        lambda: di._extract_installer(zip_with(["a" + ext, "b" + ext]), tmp), "more than one")
 # FOUND BY EXTENSION, NEVER BY NAME: RODE put the version in the filename ("RODECasterDriver
 # (1.0.5).msi"), so matching a literal name would break on their every release.
-got = di._extract_msi(zip_with(["RODECasterDriver (9.9.9).msi"]), tmp)
-check("an MSI is found by its extension, whatever version is in the name",
-      os.path.basename(got), "RODECasterDriver (9.9.9).msi")
+got = di._extract_installer(zip_with(["RODECasterDriver (9.9.9)" + ext]), tmp)
+check("an installer is found by its extension, whatever version is in the name",
+      os.path.basename(got), "RODECasterDriver (9.9.9)" + ext)
 
 # A ZIP ENTRY IS NOT A SAFE PATH. `..` in an entry name writes outside the folder we chose, so the
 # extract takes the BASENAME and never the archive's own path.
 evil = os.path.join(tmp, "evil.zip")
 with zipfile.ZipFile(evil, "w") as z:
-    z.writestr("../../escaped.msi", b"x")
-got = di._extract_msi(evil, tmp)
+    z.writestr("../../escaped" + ext, b"x")
+got = di._extract_installer(evil, tmp)
 check("a path-traversing entry lands inside the chosen folder, not above it",
       os.path.dirname(os.path.abspath(got)) == os.path.abspath(tmp), True)
 
 print("\nTHE SIGNATURE: what counts as RODE's")
-unsigned = os.path.join(tmp, "unsigned.msi")
-with open(unsigned, "wb") as f:
-    f.write(b"this is not a signed installer")
-refuses("an unsigned file is refused and NOT installed",
-        lambda: di.verify_signature(unsigned), "not validly signed")
+RODE_SUBJECT = "CN=Freedman Electronics Pty Ltd, O=Freedman Electronics Pty Ltd, C=AU"
+
+
+def signed(valid, organisation, subject=RODE_SUBJECT, report="Valid"):
+    return lambda _path: SimpleNamespace(valid=valid, report=report, organisation=organisation,
+                                         subject=subject)
+
+
+def cannot_check(_path):
+    raise OSError("no checker")
+
+
 check("the signer insisted on is RODE's legal entity, not the brand name",
       di.SIGNER, "Freedman Electronics Pty Ltd")
-check("the organisation is read from its own field",
-      di.subject_organisation("CN=Freedman Electronics Pty Ltd, O=Freedman Electronics Pty Ltd, "
-                              "L=Silverwater, S=New South Wales, C=AU"),
-      "Freedman Electronics Pty Ltd")
-check("a subject that only CONTAINS the name is not RODE's",
-      di.subject_organisation('CN=Freedman Electronics Pty Ltd, O="Not Freedman Electronics Pty '
-                              'Ltd, Honest", C=US').casefold() == di.SIGNER.casefold(), False)
+with patched((di, {"signature": signed(False, "", "", "NotSigned")})):
+    refuses("an unsigned file is refused and NOT installed",
+            lambda: di.verify_signature("x"), "not validly signed")
+with patched((di, {"signature": signed(True, "Someone Else Ltd", "CN=Someone Else Ltd")})):
+    refuses("a file signed by somebody else is refused",
+            lambda: di.verify_signature("x"), "signed by someone else")
+with patched((di, {"signature": cannot_check})):
+    refuses("and so is one whose signature cannot be checked",
+            lambda: di.verify_signature("x"), "could not be checked")
+with patched((di, {"signature": signed(True, "freedman electronics pty ltd")})):
+    check("RODE's signature passes, whatever its case", di.verify_signature("x"), RODE_SUBJECT)
 
-print("\nTHE REAL MSI, if a copy is on this machine")
-local = None
-for root, _dirs, files in os.walk(os.path.join(_bootstrap.REPO, "_driver")):
-    for f in files:
-        if f.lower().endswith(".msi"):
-            local = os.path.join(root, f)
-if local:
-    subject = di.verify_signature(local)
-    check("RODE's own MSI passes", di.subject_organisation(subject), di.SIGNER)
-    print(f"       signed by: {subject[:72]}")
-else:
-    print("  SKIP no local copy in _driver/ to check against")
 
 print("\nTHE REFUSAL TO INSTALL OVER ONE THAT IS ALREADY THERE")
 
