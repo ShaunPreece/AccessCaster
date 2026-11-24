@@ -48,6 +48,7 @@ import time
 from collections import Counter
 from typing import NamedTuple
 
+import desk_drives  # flushing the pad volume, and reading it without the OS's error boxes
 import devices
 import diagnostics  # the app's own account: why a pad is being rebuilt, and why not
 import pad_records as pr
@@ -1674,7 +1675,7 @@ def assign_create(target_idx: int, folder: int, src_wav: str, name="Sound", colo
                 time.sleep(1.0)
         if last is not None:
             raise last
-        t.flush_volume(root)
+        desk_drives.flush(root)
         diagnostics.event("pad.create",
                           f"wrote {os.path.basename(src_wav)} -> pads/{folder}/{on_device} "
                           "(mid-sequence)")
@@ -1697,7 +1698,7 @@ def assign_create(target_idx: int, folder: int, src_wav: str, name="Sound", colo
         if stale:
             diagnostics.event("pad.create",
                               f"removed the previous audio for pad {folder}: {', '.join(stale)}")
-            t.flush_volume(root)
+            desk_drives.flush(root)
     # Report the REAL on-device filename (on_device), NOT os.path.basename(src_wav): a caller can
     # pass a temporary copy, whose basename is the temp name.
     return f"created grid pad {target_idx + 1} -> {on_device}"
@@ -2610,9 +2611,9 @@ def backup_pads(dest_dir: str, progress=None) -> dict:
                 # NO PER-PAD PROGRESS LINE, deliberately. Copying a pad takes about a second, so a
                 # line each is speech that interrupts itself. The caller says how many are coming
                 # and when they are done.
-                # quiet_drive_errors: if a read fails, the caller reports it in the progress dialog,
+                # quiet_errors: if a read fails, the caller reports it in the progress dialog,
                 # so Windows must not ALSO throw its own modal "problem with this drive" box.
-                with t.quiet_drive_errors():
+                with desk_drives.quiet_errors():
                     src = _pad_audio_source(root, e["grid"], e.get("live_path"))
                     if src is None:
                         continue
@@ -2736,7 +2737,7 @@ def tidy_unused_pad_audio(progress=None, allow_empty: bool = False) -> dict:
             except OSError:
                 pass
         if removed:
-            t.flush_volume(root)
+            desk_drives.flush(root)
     mb = freed / 1024 / 1024
     msg = (f"Removed {count(len(removed), 'unused sound file')}, freeing {mb:.1f} MB. "
            f"Kept the {kept} in use." if removed

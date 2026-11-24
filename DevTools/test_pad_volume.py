@@ -12,7 +12,7 @@ THE RULES THIS PINS:
   * the remount is re-sent at the short interval only while the desk's drive has no volume.
 
 No device and no drives: the drive scan, the desk lookup and the volume check are stubbed. The live
-lookup is `desk_drives.on_desk`, run by DevTools/test_desk_drives_live.py.
+lookup is `desk_drives.desk_roots`, run by DevTools/test_desk_drives_live.py.
 
     python DevTools/test_pad_volume.py
 """
@@ -35,10 +35,9 @@ desk: set[str] = {"F:\\", "G:\\"}    # drives on the desk's USB device
 other: dict = {}                     # root -> (state, detail) for a drive in any other state
 remounts: list = []
 real_state = t._volume_state
-t._drive_roots = lambda: ["E:\\", "F:\\", "G:\\"]
 t._volume_state = lambda root: ((t.READY, "") if root in mounted
                                 else other.get(root, (t.ABSENT, "size 0")))
-desk_drives.on_desk = lambda roots: {r for r in roots if r in desk}
+desk_drives.desk_roots = lambda: set(desk)
 t.remount_pad_storage = lambda: remounts.append(1)
 
 

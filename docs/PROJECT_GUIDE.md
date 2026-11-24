@@ -626,7 +626,7 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   early in summer. Measured 29th August 2026 against four made-to-order takes.
 - **`systemDateTimezone` does NOT move that stamp** (44, 0 and 12 all gave the same UTC second), so
   it is a touchscreen display setting and an index cannot be checked from here.
-- **`flush_volume` MUST really flush.** It calls `FlushFileBuffers` on the volume's device handle
+- **`desk_drives.flush` MUST really flush.** It calls `FlushFileBuffers` on the volume's device handle
   now (milliseconds) instead of launching PowerShell (1.2-2.3 s per pad), and falls back to the
   PowerShell path if the handle will not open. A flush that silently does nothing leaves a pad's
   audio in Windows' cache and the desk gets a truncated file, which nobody discovers until the pad
@@ -1444,18 +1444,18 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   empty listing for the truth backs up nothing. A wait that gives up says which state it saw
   (`pad_volume_problem`, logged as `transfer.volume_missing`), and every message uses it.
 - **The pad volume is the drive on the DESK'S OWN USB DEVICE, found by hardware
-  (`desk_drives.on_desk`), never by what is on it.** A USB stick holding a copy of the pad folder
+  (`desk_drives.desk_roots`), never by what is on it.** A USB stick holding a copy of the pad folder
   passes every content test, and taking it sends uploads to it and lets the tidy delete its files.
   Do not go back to judging by timing (the drive that appears after entry): the desk's letter stays
   assigned out of transfer mode as an empty drive, and after an exit it can linger over 60 s still
   listing `pads` from cache, so a before-and-after comparison counts the desk's own letter as
   somebody else's and refuses it. A desk left in transfer mode needs no exit first; its volume is
   simply found. Inside a `transfer_session` every find returns the session's first root.
-- **Wrap pad-volume I/O in `rcp_transfer.quiet_drive_errors`.** A half-mounted removable volume makes
+- **Wrap pad-volume I/O in `desk_drives.quiet_errors`.** A half-mounted removable volume makes
   Windows raise a MODAL "There is a problem with this drive" box on our behalf, for a condition we
   already retry and already report better. Shaun has to find and dismiss it with a screen reader.
   Thread-scoped on purpose: never swap it for process-wide `SetErrorMode`.
-- **EVERY TRANSFER-MODE EXIT DISMOUNTS THE PAD VOLUME FIRST** (`rcp_transfer.dismount_volume`, from
+- **EVERY TRANSFER-MODE EXIT DISMOUNTS THE PAD VOLUME FIRST** (`desk_drives.dismount`, from
   `_set_transfer_mode_raw`): flush, lock, `FSCTL_DISMOUNT_VOLUME`. The exit pulls the media without
   warning, and otherwise Windows keeps its mount, cached FAT and free-space bitmap included, across
   the desk's own changes to the disk. A FAT_FILE_SYSTEM bugcheck (0x23, in

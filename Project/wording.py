@@ -7,6 +7,10 @@ Chat", never "Mic 1 + Mic 2 + Chat".
 from __future__ import annotations
 
 import datetime
+import sys
+
+# The operating system by the name its users know it by, for a sentence about what it did.
+OS_NAME = {"win32": "Windows", "darwin": "macOS"}.get(sys.platform, sys.platform)
 
 
 def percent(level) -> int:

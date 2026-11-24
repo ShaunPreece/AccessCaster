@@ -23,19 +23,17 @@ property that only a factory reset removes, so only send records whose address i
 
 from __future__ import annotations
 
-import ctypes
 import os
 import shutil
-import string
-import subprocess
 import time
 
-import desk_drives  # which drive letter is the desk's own volume
+import desk_drives  # which volume is the desk's own, and letting go of it
 import devices  # per-device matrix and fader shape
 import diagnostics  # the app's own account of every record it sends
 import model_tree  # the tree grammar, and with it the ONE address format
 import rcp_hid  # write-generation counter (invalidates cached model reads)
 import rcp_read  # the attached desk's layout, which every write address is looked up in
+import wording
 import write_guard
 from rcp_hid import REPORT_BULK_OUT, find_control_interface
 
@@ -690,9 +688,9 @@ def _set_transfer_mode_raw(on: bool) -> int:
     _transfer_on = on
     if not on:
         roots = ([_session_pad_root] if _session_pad_root
-                 else sorted(desk_drives.on_desk(_drive_roots())))
+                 else sorted(desk_drives.desk_roots()))
         for root in roots:
-            dismount_volume(root)
+            desk_drives.dismount(root)
         _session_pad_root = None
     rec = build_at(SYSTEM, "transferModeType", "int", 2 if on else 0)
     # Logged as its own event as well as the record below it: entering transfer mode
@@ -723,152 +721,6 @@ def remount_pad_storage() -> int:
     return send_record(build_remount_pad_storage())
 
 
-def flush_volume(root: str) -> None:
-    """Flush Windows' write cache for the pad-storage volume to the device.
-
-    os.sync() does NOT exist on Windows, so a copied file can sit in cache and never reach the unit
-    before we exit transfer mode. This calls `FlushFileBuffers` on a volume handle, which is what
-    `Write-VolumeCache` does underneath without the 1.2 to 2.3 s cost of starting PowerShell per pad.
-
-    THE FAILURE MODE IS SILENT AND EXPENSIVE, which is why the PowerShell path is KEPT as a
-    fallback: a flush that does nothing leaves a pad's audio in Windows' cache, the desk gets a
-    truncated file, and nobody finds out until the pad plays. DevTools/test_flush_verify_live.py
-    proves the fast path by md5 of the file read back off the volume.
-    """
-    GENERIC_WRITE = 0x40000000
-    FILE_SHARE_READ_WRITE = 0x00000001 | 0x00000002
-    OPEN_EXISTING = 3
-    INVALID_HANDLE = ctypes.c_void_p(-1).value
-    try:
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        k32.CreateFileW.restype = ctypes.c_void_p
-        k32.FlushFileBuffers.argtypes = [ctypes.c_void_p]
-        k32.CloseHandle.argtypes = [ctypes.c_void_p]
-        device = "\\\\.\\" + root[0] + ":"      # the volume's DOS device path, \\.\X:
-        handle = k32.CreateFileW(device, GENERIC_WRITE, FILE_SHARE_READ_WRITE,
-                                 None, OPEN_EXISTING, 0, None)
-        if handle in (0, INVALID_HANDLE, None):
-            diagnostics.event("transfer.flush_fallback", "no volume handle",
-                              root=root, error=ctypes.get_last_error())
-        else:
-            try:
-                if k32.FlushFileBuffers(handle):
-                    return
-                diagnostics.event("transfer.flush_fallback", "FlushFileBuffers failed",
-                                  root=root, error=ctypes.get_last_error())
-            finally:
-                k32.CloseHandle(handle)
-    except Exception as exc:
-        diagnostics.event("transfer.flush_fallback", str(exc))   # the slow but proven path follows
-    _flush_volume_powershell(root)
-
-
-def dismount_volume(root: str) -> bool:
-    """Flush, lock and dismount the pad volume at `root`, so Windows lets go of it before the desk
-    takes the media away. True when Windows dismounted it.
-
-    LEAVING TRANSFER MODE PULLS THE MEDIA WITHOUT WARNING. Without a dismount first, Windows keeps
-    its mount of the volume, cached FAT and free-space bitmap included, across the desk's own
-    changes to the disk, and marks the volume dirty, which is the "There's a problem with this
-    drive" notification on the next mount. A refused lock (another process has a file open) still
-    dismounts: those handles are invalid either way once the media goes.
-    """
-    GENERIC_READ_WRITE = 0x80000000 | 0x40000000
-    FILE_SHARE_READ_WRITE = 0x00000001 | 0x00000002
-    OPEN_EXISTING = 3
-    FSCTL_LOCK_VOLUME = 0x00090018
-    FSCTL_DISMOUNT_VOLUME = 0x00090020
-    INVALID_HANDLE = ctypes.c_void_p(-1).value
-    try:
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        k32.CreateFileW.restype = ctypes.c_void_p
-        k32.DeviceIoControl.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p,
-                                        ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32,
-                                        ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p]
-        k32.FlushFileBuffers.argtypes = [ctypes.c_void_p]
-        k32.CloseHandle.argtypes = [ctypes.c_void_p]
-        with quiet_drive_errors():
-            handle = k32.CreateFileW("\\\\.\\" + root[0] + ":", GENERIC_READ_WRITE,
-                                     FILE_SHARE_READ_WRITE, None, OPEN_EXISTING, 0, None)
-            if handle in (0, INVALID_HANDLE, None):
-                return False         # no volume mounted on that letter: nothing to let go of
-            try:
-                returned = ctypes.c_uint32(0)
-
-                def ioctl(code: int) -> bool:
-                    return bool(k32.DeviceIoControl(handle, code, None, 0, None, 0,
-                                                    ctypes.byref(returned), None))
-
-                k32.FlushFileBuffers(handle)
-                locked = False
-                for _ in range(5):
-                    if ioctl(FSCTL_LOCK_VOLUME):
-                        locked = True
-                        break
-                    time.sleep(0.1)
-                dismounted = ioctl(FSCTL_DISMOUNT_VOLUME)
-            finally:
-                k32.CloseHandle(handle)    # closing the handle also releases the lock
-        diagnostics.event("transfer.dismount", root, locked=locked, dismounted=dismounted)
-        return dismounted
-    except Exception as exc:
-        diagnostics.event("transfer.dismount_failed", f"{root}: {exc}")
-        return False
-
-
-def _flush_volume_powershell(root: str) -> None:
-    """Flush through `Write-VolumeCache`: correct, and about two seconds per call."""
-    # CREATE_NO_WINDOW: the app runs under pythonw (no console), so without this each call would
-    # flash a PowerShell window that steals focus.
-    no_window = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-    done = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", f"Write-VolumeCache {root[0]}"],
-        check=False,
-        capture_output=True,
-        creationflags=no_window,
-    )
-    if done.returncode != 0:
-        # Both flushes failed: a pad's audio may reach the desk truncated.
-        stderr = (done.stderr or b"").decode("utf-8", "replace").strip()
-        diagnostics.event("transfer.flush_failed", stderr[-300:], root=root,
-                          exit_code=done.returncode)
-
-
-class quiet_drive_errors:
-    """Stop Windows throwing a modal "There is a problem with this drive" box at the user while we
-    probe or read the pad volume.
-
-    A half-mounted removable volume makes the OS raise a HARD ERROR dialog on behalf of whichever
-    process touched it, and our recovery for that state is simply to wait and retry - so the dialog
-    reports a condition we are already handling, and it lands on the user as a modal they have to
-    find and dismiss with a screen reader. SEM_FAILCRITICALERRORS turns the dialog back into the
-    error code the caller already catches. Thread-scoped (SetThreadErrorMode, not SetErrorMode) so a background
-    pad worker cannot suppress dialogs for the rest of the process. No-op off Windows.
-    """
-
-    _SEM_FAILCRITICALERRORS = 0x0001
-
-    def __enter__(self):
-        self._old = None
-        try:
-            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            old = ctypes.c_uint(0)
-            if k32.SetThreadErrorMode(self._SEM_FAILCRITICALERRORS, ctypes.byref(old)):
-                self._old = old.value
-                self._k32 = k32
-        except Exception:
-            pass          # not Windows, or the call is unavailable: the dialogs may appear
-        return self
-
-    def __exit__(self, *exc):
-        if self._old is not None:
-            try:
-                self._k32.SetThreadErrorMode(self._old, ctypes.byref(ctypes.c_uint(0)))
-            except Exception:
-                pass      # must not replace the error the block itself is raising
-        return False
-
-
 def _pad_read_error(root: str) -> str:
     """Why the pad folder on `root` cannot be read right now, or "" when it reads.
 
@@ -879,7 +731,7 @@ def _pad_read_error(root: str) -> str:
     """
     base = os.path.join(root, "pads")
     try:
-        with quiet_drive_errors():
+        with desk_drives.quiet_errors():
             for name in sorted(os.listdir(base)):
                 pad_dir = os.path.join(base, name)
                 if not os.path.isdir(pad_dir):
@@ -893,11 +745,6 @@ def _pad_read_error(root: str) -> str:
             return ""         # a grid with no audio at all: nothing to read, and that is not an error
     except OSError as exc:
         return str(exc)
-
-
-def _drive_roots() -> list[str]:
-    """Every drive root from D to Z. A and B are floppy letters and C is the system drive."""
-    return [f"{letter}:\\" for letter in string.ascii_uppercase[3:]]
 
 
 # What `_volume_state` finds on a desk drive.
@@ -917,7 +764,7 @@ def _volume_state(root: str) -> tuple[str, str]:
     (`_pad_read_error`), which is what the caller does next.
     """
     try:
-        with quiet_drive_errors():
+        with desk_drives.quiet_errors():
             if shutil.disk_usage(root).total <= 0:
                 return ABSENT, "size 0"
             if not os.path.isdir(os.path.join(root, "pads")):
@@ -952,17 +799,19 @@ def pad_volume_problem() -> str:
 def _problem(states: dict) -> str:
     """The sentence for a wait that ended with `states`, {root: (state, detail)}."""
     if not states:
-        return ("Windows did not show the desk's pad storage as a drive. Check the desk is "
+        return (f"{wording.OS_NAME} did not show the desk's pad storage as a drive. Check the desk is "
                 "connected directly by USB.")
     for root, (state, detail) in sorted(states.items()):
         if state == UNREADABLE:
-            return (f"The desk's pad storage appeared as {root[:2]}, but Windows could not read "
+            return (f"The desk's pad storage appeared as {desk_drives.name(root)}, but "
+                    f"{wording.OS_NAME} could not read "
                     f"it ({detail}). Security software that blocks or scans removable drives can "
                     f"cause this.")
         if state == EMPTY:
-            return f"The desk's pad storage appeared as {root[:2]}, but it holds no pads folder."
-    letters = ", ".join(root[:2] for root in sorted(states))
-    return f"The desk's pad storage drive, {letters}, stayed empty in Windows."
+            return (f"The desk's pad storage appeared as {desk_drives.name(root)}, but it holds "
+                    f"no pads folder.")
+    names = ", ".join(desk_drives.name(root) for root in sorted(states))
+    return f"The desk's pad storage drive, {names}, stayed empty in {wording.OS_NAME}."
 
 
 def find_pad_volume(timeout_s: float = 45.0, reissue_remount_every: float = 6.0,
@@ -970,7 +819,7 @@ def find_pad_volume(timeout_s: float = 45.0, reissue_remount_every: float = 6.0,
     """Wait for the pad-storage FAT volume to mount; return its root path (e.g. 'F:\\'), or None
     if it never appears within timeout_s, with the reason in `pad_volume_problem`.
 
-    Only a drive on the desk's own USB device can be the pad volume (`desk_drives.on_desk`), so a
+    Only a drive on the desk's own USB device can be the pad volume (`desk_drives.desk_roots`), so a
     USB stick holding a copy of the pad folder is never taken for it: an upload would go to the
     stick and the tidy would delete its files. The desk's letter stays assigned out of transfer
     mode and after a stuck one, as an empty or not-yet-ready drive, which `_volume_state` reports
@@ -998,7 +847,7 @@ def find_pad_volume(timeout_s: float = 45.0, reissue_remount_every: float = 6.0,
         if _transfer_hold > 0 and _session_pad_root:
             candidates = [_session_pad_root]
         else:
-            candidates = sorted(desk_drives.on_desk(_drive_roots()))
+            candidates = sorted(desk_drives.desk_roots())
         mounted = False
         for root in candidates:
             state = _volume_state(root)

@@ -27,6 +27,7 @@ import os
 import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on the path; import FIRST)
+import desk_drives
 import rcp_read
 import rcp_transfer as t
 import soundpad
@@ -68,7 +69,7 @@ def main() -> int:
         found, missing, extra = {}, [], {}
         for grid, fname in sorted(EXPECTED.items()):
             folder = os.path.join(root, "pads", str(grid))
-            with t.quiet_drive_errors():
+            with desk_drives.quiet_errors():
                 names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
             if fname in names:
                 size = os.path.getsize(os.path.join(folder, fname))

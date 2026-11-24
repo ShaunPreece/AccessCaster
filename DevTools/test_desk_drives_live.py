@@ -1,4 +1,4 @@
-"""Live check that `desk_drives.on_desk` picks out the desk's own drive letter and nothing else.
+"""Live check that `desk_drives.desk_roots` picks out the desk's own drive letter and nothing else.
 
 Read only: it asks Windows' device tree, and sends nothing to the desk. Needs the desk attached;
 transfer mode does not matter, because the desk's letter is assigned in or out of it. The answer is
@@ -15,12 +15,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401
 import _testkit
-import desk_drives
-import rcp_transfer
+from win import desk_drives
 from _testkit import check, check_true
 
-roots = rcp_transfer._drive_roots()
-found = desk_drives.on_desk(roots)
+roots = desk_drives._drive_roots()
+found = desk_drives.desk_roots()
 print("drives on the desk:", " ".join(sorted(found)) or "none")
 
 gadgets = {desk_drives._disk_number(i) for i in desk_drives._disk_interfaces()

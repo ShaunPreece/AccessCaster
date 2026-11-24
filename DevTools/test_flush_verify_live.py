@@ -1,6 +1,6 @@
 """Does the FAST flush actually get the bytes onto the desk? Writes a pad, then goes and looks.
 
-WHY THIS EXISTS. `rcp_transfer.flush_volume` calls `FlushFileBuffers` on a volume handle rather than
+WHY THIS EXISTS. `desk_drives.flush` calls `FlushFileBuffers` on a volume handle rather than
 launching PowerShell (`Write-VolumeCache`) per pad, which costs 1.2 to 2.3 seconds and is the
 biggest single item in a restore after transfer-mode cycling.
 
@@ -141,8 +141,8 @@ def main() -> int:
         shutil.rmtree(tmp, ignore_errors=True)
 
     if _testkit.failed():
-        print("PUT THE POWERSHELL FLUSH BACK: rcp_transfer.flush_volume should call "
-              "_flush_volume_powershell unconditionally until this passes.")
+        print("PUT THE POWERSHELL FLUSH BACK: win/desk_drives.flush should call "
+              "_flush_powershell unconditionally until this passes.")
     return _testkit.finish()
 
 

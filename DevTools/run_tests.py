@@ -5,7 +5,8 @@
     python DevTools/run_tests.py -v               print every suite's output, not only a failure's
 
 An offline suite is a `test_*.py` whose name does not end `_live.py`. A `_live` suite drives the
-attached desk and is never run from here, whatever is asked for. A suite that does not import
+attached desk and is never run from here, whatever is asked for. A `test_win_*.py` suite tests
+Windows' half of the platform layer and runs only on Windows. A suite that does not import
 `_bootstrap` is reported as a failure and not run, because `_bootstrap` is what refuses device
 writes inside a test.
 
@@ -36,6 +37,8 @@ def offline_suites(words: list[str] | None = None) -> list[str]:
     names = []
     for name in sorted(os.listdir(DEVTOOLS)):
         if not (name.startswith("test_") and name.endswith(".py")) or name.endswith("_live.py"):
+            continue
+        if name.startswith("test_win_") and sys.platform != "win32":
             continue
         if words and not any(word in name for word in words):
             continue
