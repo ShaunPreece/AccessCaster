@@ -76,8 +76,9 @@ import app_window  # noqa: E402
 app_window.show = lambda: True
 check("a raised window is silent", commands.run("app.window")["message"], "")
 app_window.show = lambda: False
-check("a refused raise says where the window is", "Alt+Tab" in commands.run("app.window")["message"],
-      True)
+import wording  # noqa: E402
+check("a refused raise says where the window is",
+      wording.APP_SWITCHER in commands.run("app.window")["message"], True)
 app_window.show = lambda: None
 check("an app that is closing says so, not where a window is",
       commands.run("app.window")["message"], "AccessCaster is closing.")

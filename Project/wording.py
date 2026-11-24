@@ -13,6 +13,8 @@ import sys
 OS_NAME = {"win32": "Windows", "darwin": "macOS"}.get(sys.platform, sys.platform)
 # Where the system keeps an app's icon while its window is closed, for a sentence.
 TRAY = {"win32": "the system tray", "darwin": "the menu bar"}.get(sys.platform, "the system tray")
+# The keys that switch between open apps.
+APP_SWITCHER = {"win32": "Alt+Tab", "darwin": "Command+Tab"}.get(sys.platform, "Alt+Tab")
 
 
 def percent(level) -> int:

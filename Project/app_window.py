@@ -5,7 +5,9 @@ stays None.
 
 The platform supplies `raise_window(handle)`: restore the native window `handle` if minimised and
 bring it to the front with a real activation, the kind a screen reader follows, from any thread.
-Returns whether the system made it the foreground window; logs the outcome as `window.raise`.
+Returns whether the system made it the foreground window, and logs the outcome as `window.raise`.
+macOS answers an activation later, so there it returns whether one was asked for and logs the
+answer when it comes.
 """
 import sys
 
