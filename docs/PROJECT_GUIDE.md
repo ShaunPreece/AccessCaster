@@ -631,7 +631,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   PowerShell path if the handle will not open. A flush that silently does nothing leaves a pad's
   audio in Windows' cache and the desk gets a truncated file, which nobody discovers until the pad
   is pressed. `DevTools/test_flush_verify_live.py` is the licence: write, LEAVE transfer mode,
-  re-enter, read back, compare md5.
+  re-enter, read back, compare md5. On macOS it is `sync_volume_np` with FULLSYNC and WAIT, which
+  returns once the data is on the media; `os.sync` alone only starts the writes.
 - **`rcp_transfer.transfer_session()` makes `set_transfer_mode(False)` a no-op while held.** That is
   the point - the per-pad code keeps its own enter/exit calls and they stop taking effect - but it
   means any new code that genuinely needs the volume unmounted mid-batch will not get it. The hold
@@ -1454,7 +1455,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
 - **Wrap pad-volume I/O in `desk_drives.quiet_errors`.** A half-mounted removable volume makes
   Windows raise a MODAL "There is a problem with this drive" box on our behalf, for a condition we
   already retry and already report better. Shaun has to find and dismiss it with a screen reader.
-  Thread-scoped on purpose: never swap it for process-wide `SetErrorMode`.
+  Thread-scoped on purpose: never swap it for process-wide `SetErrorMode`. macOS raises no such
+  dialog, so its half does nothing.
 - **EVERY TRANSFER-MODE EXIT DISMOUNTS THE PAD VOLUME FIRST** (`desk_drives.dismount`, from
   `_set_transfer_mode_raw`): flush, lock, `FSCTL_DISMOUNT_VOLUME`. The exit pulls the media without
   warning, and otherwise Windows keeps its mount, cached FAT and free-space bitmap included, across
@@ -1464,7 +1466,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   dismounts. **The volume arrives with its boot-sector dirty byte (0x41) already set**, with nothing
   written and after a clean dismount (Pro II, fw 1.7.6), so the "There's a problem with this drive"
   notification is the desk's doing, and the dismount does not stop it. Do not clear the byte: the
-  desk appears to keep its own side mounted.
+  desk appears to keep its own side mounted. On macOS the dismount is `diskutil unmount`, forced
+  when a file is held open, and a volume pulled while mounted shows "Disk Not Ejected Properly".
 
 ## CallMe
 
