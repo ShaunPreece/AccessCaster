@@ -304,6 +304,73 @@ check(f"{len(sent)} records, each on its block's new position", wrong[:3], [])
 check("CHANNEL[0] is one further on", moved.path(t.channel_key(0)), [0x1D])
 check("a block ahead of the insert stays put", moved.path(t.OUTPUT), [0x0D])
 
+# ---- 2b. The same desk in another USB mode: the blocks reordered and split into runs ------------
+# A Pro II sending pre-fader multitrack (product id 0x0092) publishes the same blocks and copies in
+# another order, with CHANNEL, EFFECTS_PARAMETERS, MIXMINUSES, MIX and INPUTSOURCE each cut into
+# runs that other blocks sit between. A key's copy counts through every run of its block, so each
+# record must land where that copy was measured on the desk: (first copy, root position) per run.
+print("a Pro II reading product id 0x0092: every write on the position measured there")
+PID0092_ROOT = {
+    "PHYSICALINTERFACE": ((0, 0x00),), "RECORDER": ((0, 0x02),), "GUI": ((0, 0x05),),
+    "HEADPHONE": ((0, 0x07),), "OUTPUT": ((0, 0x0B),), "MASTERCHANNEL": ((0, 0x0C),),
+    "SYSTEM": ((0, 0x0D),), "NETWORK": ((0, 0x0E),),
+    "CHANNEL": ((0, 0x1A), (9, 0xFA)),
+    "EFFECTS_PARAMETERS": ((0, 0x23), (10, 0xFB)),
+    "MIXMINUSES": ((0, 0x2D), (10, 0xFC)),
+    "MIX": ((0, 0x37), (156, 0xFF), (247, 0x17D)),
+    "INPUTSOURCE": ((0, 0xDF), (12, 0x161), (19, 0x295)),
+    "SHOWCONTROL": ((0, 0xED),), "RECORDINGS": ((0, 0xEE),), "SOUNDPADS": ((0, 0xF4),),
+    "PADEFFECTS": ((0, 0xF6),),
+}
+
+
+def pid0092(key) -> list:
+    first, position = [run for run in PID0092_ROOT[key[0]] if run[0] <= key[1]][-1]
+    path = [position + key[1] - first]
+    return path + [4 + key[3]] if len(key) == 4 else path
+
+
+with as_device(devices.PRO2), on_layout(lf.PRO2_177_PID0092):
+    sent, want = drive(devices.PRO2)
+check("as many records as writes", len(sent), len(want))
+wrong = [(got, exp) for got, exp in zip(sent, by_key(want, pid0092)) if got != exp]
+check(f"{len(sent)} records, each on the position measured on that desk", wrong[:3], [])
+split, whole = lf.load(lf.PRO2_177_PID0092), lf.load(lf.PRO2_177)
+check("every block the app writes has as many copies as on the other layout",
+      [(b, split.count(b)) for b in PID0092_ROOT if split.count(b) != whole.count(b)], [])
+check("CallMe 1's row is in the second MIX run", split.path(t.cross_point_key(0, 16)), [0x133])
+check("and its output mode in the second MIXMINUSES run", split.path(t.output_key(10)), [0xFC])
+check("Mic 1's input position on the other layout is an RC Sync cell here",
+      split.locate(whole.path(t.input_key(0))), ("RCSYNCMIX", 98))
+check_true("which carries no gain, so a write of one there is refused",
+           not split.has(("RCSYNCMIX", 98), "inputMicrophoneGain"))
+check("and the other layout's SYSTEM position is AUDIO here",
+      split.locate(whole.path(t.SYSTEM)), ("AUDIO", 0))
+
+# The reads count copies the same way. One value in a later run of each block, read by the app's
+# own readers from a dump of this shape.
+later = {(t.cross_point_key(0, 16), "mixDisabled"): True,
+         (t.cross_point_key(10, 0), "mixDisabled"): True,
+         (t.output_key(10), "outputMixMinus"): 2,
+         (t.input_key(16), "inputDigitalGain"): -7,
+         (t.channel_key(9), "channelInputSource"): 9,
+         **{(t.channel_key(s), "channelInputSource"): code
+            for s, code in enumerate((0, 1, 6, 9, 7, 8, -1, 11, 10))}}
+split_dump = lf.skeleton(lf.PRO2_177_PID0092, later)
+with as_device(devices.PRO2):
+    state = rcp_read.read_matrix_state(split_dump)
+    callme = next(c for c in devices.PRO2.ui_channels if c["name"] == "CallMe1")
+    level = channels.input_value(split_dump, callme, "inputDigitalGain")
+check_true("the matrix reads: 390 cells over three runs", state["ok"], state.get("reason", ""))
+check("a cell in the second run is its own source and output", state["excluded"][0][16], True)
+check("a cell in the first run likewise", state["excluded"][10][0], True)
+check("and no other cell is set",
+      sum(on for row in state["excluded"].values() for on in row.values()), 2)
+check("the eleventh output's mode is read from the second run", state["modes"][10], 2)
+check("an input past the first run reads its own node", level, -7)
+check("the fader layout reads every strip, the tenth from its own run",
+      rcp_read.strip_values(split_dump, "channelInputSource"), [0, 1, 6, 9, 7, 8, -1, 11, 10, 9])
+
 # ---- 3. The lookup refuses what the desk does not have -----------------------------------------
 print("the lookup refuses rather than guesses")
 book = lf.load(lf.PRO2_177)
@@ -384,7 +451,7 @@ KEYED_READS = (
     + [(t.fader_key(i), "faderLevel") for i in range(9)]
     + [(t.channel_key(s), "channelOutputMute") for s in range(10)]
     + [(("SIPCALLSLOTS", i), "sipSlotCallState") for i in range(3)])
-for fixture in (lf.PRO2_177, lf.PRO2_176, lf.DUO_173):
+for fixture in (lf.PRO2_177, lf.PRO2_176, lf.DUO_173, lf.PRO2_177_PID0092):
     book = lf.load(fixture)
     check(f"{fixture}: every keyed read resolves",
           [(k, p) for k, p in KEYED_READS if not book.has(k, p)], [])

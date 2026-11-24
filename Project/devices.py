@@ -27,6 +27,10 @@ import rcp_hid
 # its other modes). An unknown id therefore falls through to DEFAULT rather than naming the desk,
 # which is right for a Pro II and wrong for a Duo in Expanded. Identifying by the dump's own
 # `systemName` is the fix; see `device_from_system_name` below and PROJECT_GUIDE part 2.
+#
+# NOR DOES AN ID NAME A LAYOUT. A Pro II read under 0x0092 publishes its blocks in another order
+# than one read under 0x0037, several of them in more than one run, so nothing here or anywhere
+# else may hold a block's position: `model_tree.Layout` finds each node on the attached desk.
 PID_PRO2 = 0x0037
 PID_DUO = 0x0050
 
@@ -297,8 +301,11 @@ class HeadphoneTypeSpec:
       outputs : (HEADPHONE index, label) per addressable headphone output, in UI order.
       values  : (int, label) per selectable amp type, in UI order.
 
+    The three values are RODE's app's own, each read off a Pro II either side of a change made in
+    that app. Which of them is the loudest is not settled (PROJECT_GUIDE part 2), so no label or
+    hint may say.
+
     NOT CONFIRMED:
-      * value 2 = "Low sensitivity" - the RODE app's label; the value itself is unverified.
       * HP2 on the PRO II specifically (confirmed on the Duo).
       * The Pro II's Headphone 3/4 outputs (HEADPHONE[2] and [3]) are deliberately NOT listed: what
         they do has not been confirmed.

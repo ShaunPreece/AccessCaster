@@ -195,6 +195,12 @@ try:
     check_true("a name matching neither desk teaches nothing, rather than teaching a guess",
                devices.note_system_name(_Iface(0x0094, "TEST-OTHER"), "Some Other Box") is None
                and "TEST-OTHER" not in devices._LEARNED)
+    # The name as a dump gives it: the desk writes "RØDECaster Pro II" in UTF-8 and the parser
+    # hands the bytes over as latin-1, so the O arrives as two other characters.
+    check_true("a Pro II under a multitrack id is named by its dump, mangled O and all",
+               devices.note_system_name(_Iface(0x0092, "TEST-PRO2-1"),
+                                        "RØDECaster Pro II".encode().decode("latin1"))
+               is devices.PRO2)
     check_true("a known id still wins without any dump at all",
                devices.resolve_device(devices.PID_DUO) is devices.DUO
                and devices.resolve_device(devices.PID_PRO2) is devices.PRO2)
