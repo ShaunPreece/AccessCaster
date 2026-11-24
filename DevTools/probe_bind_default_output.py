@@ -30,9 +30,10 @@ import comtypes.client
 import desk_access
 import rcp_read
 import recorder
-import virtual_devices as vd
+import virtual_devices
 import _desk
 from win import core_audio as ca
+from win import virtual_devices as vd
 import usb_audio
 
 EXPANDED_PID = "pid_0094"       # post-fader multitrack AND Expanded: the mode with fader inputs
@@ -119,11 +120,11 @@ class Sampler(threading.Thread):
     def run(self) -> None:
         at = time.monotonic()
         was_here = False
-        was_bound = vd.read_status().connected
+        was_bound = virtual_devices.read_status().connected
         while not self.stop.is_set():
             here = any(EXPANDED_PID in path and active
                        for path, active in hid_interfaces().items())
-            bound = vd.read_status().connected
+            bound = virtual_devices.read_status().connected
             now = time.monotonic() - at
             if here and not was_here:
                 self.arrivals += 1
@@ -233,7 +234,7 @@ def main() -> None:
             # app's own follow-up may still be making arrivals of its own, so give the cycle room
             # rather than calling a miss early.
             time.sleep(25)
-            st = vd.read_status()
+            st = virtual_devices.read_status()
             print(f"cycle {i}: connected={st.connected}  "
                   f"arrivals so far={sampler.arrivals} binds={sampler.binds}", flush=True)
     finally:

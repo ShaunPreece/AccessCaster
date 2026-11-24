@@ -546,8 +546,8 @@ trap. Reasoning that only matters at one call site lives in a comment there inst
   **WINDOWS' AUDIO IS GUARDED THE SAME WAY** (5th October 2026). Moving the default output,
   enabling or disabling an endpoint, and setting an endpoint's level or mute all raise in an
   offline test through `write_guard.refuse_in_tests`: every endpoint change goes through
-  `virtual_devices._policy`, and the level and mute setters call it first. A new Windows audio
-  write must do the same. Without it, `test_announcer_reconnect`'s reconnects ran the real
+  `win/virtual_devices._policy`, and the level and mute setters in `meters` call it first. A new
+  audio write, on any platform, must do the same. Without it, `test_announcer_reconnect`'s reconnects ran the real
   `_virtual_devices_follow` and moved Shaun's screen reader between the laptop and the desk.
 
   **A SETTLED QUESTION DOES NOT KEEP ITS PROBE** (Shaun, 30th August 2026: "if we really want to
