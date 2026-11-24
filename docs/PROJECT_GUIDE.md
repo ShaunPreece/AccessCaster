@@ -1942,12 +1942,15 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   runs (`hotkeys._FOREGROUND_COMMANDS`); `SendMessageTimeout` keeps it running while the wx thread
   shows the window, then `app_window.raise_window` raises it from the handler. A second launch hands
   its own right over with `AllowSetForegroundWindow` before posting `WM_OPEN_WINDOW`.
-- **NOTHING IN `native/` OUTSIDE `native/win/` CALLS A WINDOWS API.** Screen reader speech and
-  control descriptions go through `native.announce` and `native.a11y`, which import the platform's
-  own. Import `native.win` directly, or add a Win32 call to a page, and a port to another platform
-  has to hunt for it. The Categories tree is a `wx.TreeCtrl` on purpose: on Windows it is the
-  native tree view, where `wx.dataview.DataViewTreeCtrl` is a control wx draws itself. A port to
-  macOS swaps it, because there the roles reverse.
+- **NOTHING IN `native/` OUTSIDE `native/win/` AND `native/mac/` CALLS A SYSTEM API.** Screen
+  reader speech and control descriptions go through `native.announce` and `native.a11y`, which
+  import the platform's own. Import `native.win` directly, or add a Win32 call to a page, and the
+  Mac has to hunt for it. The Categories tree is a `wx.TreeCtrl` on purpose: on Windows it is the
+  native tree view, where `wx.dataview.DataViewTreeCtrl` is a control wx draws itself. **On macOS
+  the roles reverse:** VoiceOver cannot enter a `wx.TreeCtrl` or the app's drawn `SliderCtrl`, and
+  operates `DataViewTreeCtrl` (an NSOutlineView) and `wx.Slider` (an NSSlider) like any Mac
+  control (24th November 2026, `DevTools/probe_mac_voiceover.py`). Every other control the window
+  uses is the system's own on both.
 - **NO `wx.Simplebook` OR `wx.Notebook` TO SWITCH THE PAGES.** Both move the focus into each page
   they show, which pulls it out of the Categories tree on every arrow press. `MainFrame._show`
   shows and hides the pages itself.
