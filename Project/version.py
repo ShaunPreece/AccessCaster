@@ -34,11 +34,20 @@ the change.
 """
 from __future__ import annotations
 
-__version__ = "3.3.1"
+__version__ = "3.3.2"
 
 # (version, [(heading, body), ...]). Each entry is a heading and one paragraph in the release
 # notes, in order.
 HISTORY = [
+    ("3.3.2", [
+        ("Restoring a profile or backup",
+         "Restoring now puts back the USB input mode before the faders, so a profile saved in "
+         "Expanded brings Game, Music, A and B back onto their faders. Empty faders and linked mic "
+         "pairs now come back too, and each channel keeps its processing when a restore moves it. "
+         "Anything a restore cannot put back is named in its result instead of being skipped "
+         "silently."),
+    ]),
+
     ("3.3.1", [
         ("Up and Down arrows on sliders in JAWS",
          "In JAWS, Up and Down arrow on a slider said the value from before the key, so each press "
