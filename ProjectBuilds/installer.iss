@@ -129,7 +129,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 ; in the tray with the announcer and the global shortcuts live and opens NO window; started by hand
 ; it opens its window. The app sets this same value itself (App settings, General, "Start
 ; AccessCaster when you sign in to Windows"), so both write the IDENTICAL string, under the
-; SAME value name so uninsdeletevalue still removes it. DevTools/test_autostart.py reads this file
+; SAME value name so uninsdeletevalue still removes it. DevTools/test_win_autostart.py reads this file
 ; and asserts they have not drifted, because nothing else would notice.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; \
     ValueName: "AccessCaster"; ValueData: """{app}\{#AppExe}"" --startup"; \

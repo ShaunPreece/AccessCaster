@@ -6,8 +6,6 @@ engages voice-FX and mixer pads but a SOUND pad sets the flag and plays nothing,
 DOES play a pad when the same request arrives on its MIDI endpoint, named "MIDI function". That is
 what lets a keyboard shortcut play any pad on the desk.
 
-No package and no driver: Windows' own winmm (`midiOutOpen` / `midiOutShortMsg`) through ctypes.
-
 THE ADDRESSING RULE, and it is the opposite way round from what you would guess: the CC NUMBER is
 the FUNCTION and the MIDI CHANNEL is WHICH pad. Play-a-pad is CC 35, so pad 1 is status 0xB0 and
 pad 8 is 0xB7. A play is value 127 then value 0, i.e. press then release.
@@ -16,65 +14,45 @@ pad 8 is 0xB7. A play is value 127 then value 0, i.e. press then release.
 (`rcp_transfer.set_midi_control`) and `pad_shortcuts` arms it at the point of use;
 `midi_enabled()` here is the TOOL shape, which puts the setting back afterwards.
 
-THE PORT IS OPENED ONCE AND KEPT. `midiOutOpen` is not free and a pad shortcut has to be instant, so
+THE PORT IS OPENED ONCE AND KEPT. Opening it is not free and a pad shortcut has to be instant, so
 this module owns one process-wide handle behind a lock, opens it lazily on the first send and
-REOPENS it once if a send fails - which is what a replug looks like from here. Nothing about it is
-exclusive (two `midiOutOpen` calls on this port both succeed), so holding it open cannot
-lock another program out.
+REOPENS it once if a send fails, which is what a replug looks like from here. Nothing about it is
+exclusive, so holding it open cannot lock another program out.
 
 BANK SELECT IS NOT A MIDI PROBLEM. MIDI reaches only the bank the desk is on, and the bank is an
-ordinary HID write - `soundpad.select_bank`. Do not go looking for the CC 0 / CC 1 bank select in
+ordinary HID write: `soundpad.select_bank`. Do not go looking for the CC 0 / CC 1 bank select in
 RODE's spec; it is marked "verify" and it is not needed.
+
+The platform supplies the ports, with no package and no driver:
+  - `ports()`: every MIDI output's name.
+  - `find(name)`: the id of the output named `name`, or None.
+  - `open_port(name)`: a handle on it. Raises RuntimeError saying what to do when it cannot.
+  - `send(handle, status, data1, data2)`: one short message. Raises OSError when it is refused.
+  - `close_port(handle)`: never raises.
 """
 from __future__ import annotations
 
 import contextlib
-import ctypes
+import sys
 import threading
 import time
-from ctypes import wintypes
 
 import write_guard
+
+if sys.platform == "win32":
+    from win.midi_out import close_port, find, open_port, ports, send
+else:
+    raise ImportError(f"No MIDI output for {sys.platform}: the Windows one is win/midi_out.py")
 
 PORT_NAME = "MIDI function"
 CC_PLAY_PAD = 35
 
-_winmm = ctypes.WinDLL("winmm")
-
-
-class _MIDIOUTCAPS(ctypes.Structure):
-    _fields_ = [("wMid", wintypes.WORD), ("wPid", wintypes.WORD),
-                ("vDriverVersion", wintypes.UINT), ("szPname", wintypes.WCHAR * 32),
-                ("wTechnology", wintypes.WORD), ("wVoices", wintypes.WORD),
-                ("wNotes", wintypes.WORD), ("wChannelMask", wintypes.WORD),
-                ("dwSupport", wintypes.DWORD)]
-
-
-def ports() -> list:
-    """Every MIDI OUT port name, in device-id order."""
-    out = []
-    for i in range(_winmm.midiOutGetNumDevs()):
-        caps = _MIDIOUTCAPS()
-        _winmm.midiOutGetDevCapsW(i, ctypes.byref(caps), ctypes.sizeof(caps))
-        out.append(caps.szPname)
-    return out
-
 
 def find_port(name: str = PORT_NAME):
-    """The device id of the desk's MIDI OUT port, or None. Matched on a prefix, because Windows
-    truncates a MIDI port name to 31 characters and appends an index when several are present."""
-    for i, got in enumerate(ports()):
-        if got.startswith(name[:31]):
-            return i
-    return None
+    """The id of the desk's MIDI output, or None."""
+    return find(name)
 
 
-def _cc_message(channel: int, control: int, value: int) -> int:
-    """midiOutShortMsg packs a message little-endian into one DWORD: status, data1, data2."""
-    return (0xB0 | (channel & 0x0F)) | ((control & 0x7F) << 8) | ((value & 0x7F) << 16)
-
-
-# --- the shared handle ---------------------------------------------------------------------------
 # One handle for the life of the process, because a pad shortcut has to be instant and the open is
 # the slow part. Guarded by a lock: two shortcuts pressed together must not interleave on one
 # handle.
@@ -84,31 +62,16 @@ _handle = None
 
 def _open_locked():
     global _handle
-    if _handle is not None:
-        return _handle
-    port = find_port()
-    # Windows MIDI Services (midisrv) can stay up with its USB transports unloaded, so the desk is
-    # on the bus with no MIDI port; a replug does not bring it back, a restart of the service does.
-    # A process that opened winmm before that restart then fails every open until it restarts too.
-    if port is None:
-        raise RuntimeError(f"Windows is not offering the desk's {PORT_NAME!r} MIDI port. "
-                           f"Restarting the Windows MIDI Service, or the computer, brings it back")
-    h = wintypes.HANDLE()
-    rc = _winmm.midiOutOpen(ctypes.byref(h), port, 0, 0, 0)
-    if rc:
-        raise RuntimeError(f"could not open the desk's MIDI port (error {rc}). If the Windows "
-                           f"MIDI Service was restarted, restart AccessCaster")
-    _handle = h
+    if _handle is None:
+        _handle = open_port(PORT_NAME)
     return _handle
 
 
 def _close_locked() -> None:
     global _handle
-    if _handle is None:
-        return
-    _winmm.midiOutReset(_handle)      # winmm reports failure by return code, never by raising
-    _winmm.midiOutClose(_handle)
-    _handle = None
+    if _handle is not None:
+        close_port(_handle)
+        _handle = None
 
 
 def close() -> None:
@@ -122,20 +85,21 @@ def send_cc(channel: int, control: int, value: int) -> None:
 
     RETRIES ONCE ON A FAILED SEND, after throwing the handle away. A handle stays valid across a
     great many things but not across a replug, and without the retry the first unplug of a session
-    would leave every later pad shortcut dead until the app was restarted - which reads as "pads
+    would leave every later pad shortcut dead until the app was restarted, which reads as "pads
     stopped working" rather than as "the cable moved"."""
     write_guard.refuse_in_tests("play a pad")
+    message = (0xB0 | (channel & 0x0F), control & 0x7F, value & 0x7F)
     with _lock:
-        _open_locked()
-        rc = _winmm.midiOutShortMsg(_handle, wintypes.DWORD(_cc_message(channel, control, value)))
-        if not rc:
+        try:
+            send(_open_locked(), *message)
             return
-        _close_locked()
-        _open_locked()
-        rc = _winmm.midiOutShortMsg(_handle, wintypes.DWORD(_cc_message(channel, control, value)))
-        if rc:
+        except OSError:
             _close_locked()
-            raise RuntimeError(f"the desk would not take the MIDI message (rc {rc})")
+        try:
+            send(_open_locked(), *message)
+        except OSError as exc:
+            _close_locked()
+            raise RuntimeError(f"the desk would not take the MIDI message ({exc})") from None
 
 
 def press_pad(pad: int) -> None:

@@ -77,10 +77,4 @@ with patched((rcp_read, {"read_model": read_model, "strip_values": lambda blob, 
     check_true("though the model is still trusted", desk_model.trusted())
     rode_app.note(False)
 
-print("\nTHE PROCESS CHECK")
-with patched((rode_app, {"EXE": "python.exe"})):
-    check_true("this test's own interpreter is found by name", rode_app.running())
-with patched((rode_app, {"EXE": "no such program.exe"})):
-    check("a name nothing runs under is not", rode_app.running(), False)
-
 sys.exit(_testkit.finish())

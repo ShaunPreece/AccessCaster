@@ -1,53 +1,46 @@
-"""Start AccessCaster when this user signs in: the same registry value the installer's checkbox
-writes, readable and writable from inside the app.
+"""Start AccessCaster when this user signs in: the same entry the installer writes, readable and
+writable from inside the app.
 
 WHY IT IS A SWITCH IN THE APP AT ALL. The installer offers it once, on a screen somebody is trying
-to get past, and missing it leaves no way back short of running Setup again. It is one HKCU value,
-so the app can own it with no admin rights and no elevation prompt.
-
-THE VALUE IS THE INSTALLER'S, NOT OURS, AND THAT IS DELIBERATE. Same key, same NAME:
-
-    HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run
-      "AccessCaster" = "<install path>\\AccessCaster.exe" --startup
-
-`installer.iss` sets it with `uninsdeletevalue`, so uninstalling removes it. Write it under any
-other name and an uninstall leaves a Run entry pointing at a deleted exe - a startup error every
-login, with nothing left on the machine to turn it off. `DevTools/test_autostart.py` reads
-`installer.iss` and asserts the two still agree, because nothing else would notice them drifting.
-
-HKCU AND NEVER HKLM. Only one copy of AccessCaster runs per PC (instance.py), so a machine-wide Run
-entry would start it for every account that signs in and all but the first would be refused. That
-is not hypothetical: a machine can have somebody at the console and somebody else in an RDP
-session at once. Autostart is a choice each account makes for itself, which is why the wording says
-"when YOU sign in".
+to get past, and missing it leaves no way back short of running Setup again. It is a per-user
+entry, so the app can own it with no admin rights and no elevation prompt. Autostart is a choice
+each account makes for itself, which is why the wording says "when YOU sign in".
 
 THE `--startup` FLAG IS THE WHOLE DIFFERENCE BETWEEN THIS AND A NORMAL LAUNCH. Started by hand you
 want the window; started at login you want the tray, the announcer and the global shortcuts, and
 no window taking the focus you were using for something else. `tray.main` reads it.
+
+The platform supplies the entry itself:
+  - `command_for(exe, flag)`: what the entry holds when it starts `exe` with `flag`, as text.
+  - `current()`: what the entry holds now, or None when there is none. Never raises.
+  - `install(command)`: write the entry. Raises on failure.
+  - `remove()`: delete it; absent is not a failure. Raises on any other failure.
 """
 from __future__ import annotations
 
 import os
 import sys
 
-# The installer's key, name and flag. Change any of these and change installer.iss in the same edit.
-RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-VALUE_NAME = "AccessCaster"
+if sys.platform == "win32":
+    from win.autostart import command_for, current, install, remove
+else:
+    raise ImportError(f"No sign-in entry for {sys.platform}: the Windows one is "
+                      "win/autostart.py")
+
 STARTUP_FLAG = "--startup"
-EXE_NAME = "AccessCaster.exe"
 
 
 def started_at_login(argv=None) -> bool:
-    """Was this process launched by the Run entry rather than by a person?"""
+    """Was this process launched by the sign-in entry rather than by a person?"""
     return STARTUP_FLAG in (sys.argv[1:] if argv is None else argv)
 
 
 def app_exe() -> str | None:
     """The installed executable, or None when we are not running as one.
 
-    A dev run's `sys.executable` is python.exe and the app is a script argument, so writing that
-    would produce a Run entry that breaks the moment the repo moves - and it would break SILENTLY,
-    at a login, which is the worst place to find out. Refusing is the honest answer.
+    A dev run's `sys.executable` is the Python interpreter and the app is a script argument, so
+    writing that would produce an entry that breaks the moment the repo moves, SILENTLY, at a
+    login. Refusing is the honest answer.
     """
     if not getattr(sys, "frozen", False):
         return None
@@ -55,54 +48,20 @@ def app_exe() -> str | None:
     return exe if os.path.isfile(exe) else None
 
 
-def command_for(exe: str) -> str:
-    """The exact Run value for an executable. Quoted, because the install path contains spaces
-    (Program Files, or a user profile with a space in the name) and an unquoted path with a space
-    is parsed as a command plus arguments."""
-    return f'"{exe}" {STARTUP_FLAG}'
-
-
-def _open_run_key(write: bool):
-    import winreg
-    access = winreg.KEY_READ | (winreg.KEY_SET_VALUE if write else 0)
-    return winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, access)
-
-
-def read_value() -> str | None:
-    """What the Run entry currently says, or None if there is not one. Never raises."""
-    try:
-        import winreg
-        with _open_run_key(False) as key:
-            value, _kind = winreg.QueryValueEx(key, VALUE_NAME)
-            return str(value)
-    except Exception:
-        return None
-
-
-def _delete_value(name: str) -> None:
-    """Remove one Run value if it is there. Absent is not a failure."""
-    import winreg
-    try:
-        with _open_run_key(True) as key:
-            winreg.DeleteValue(key, name)
-    except FileNotFoundError:
-        pass
-
-
 def state() -> dict:
     """{enabled, supported, value, message} for the UI.
 
     `supported` False means the switch must refuse rather than write, because this is not the
-    installed exe. The message says so, because "it did not work" with no reason is the failure a
+    installed app. The message says so, because "it did not work" with no reason is the failure a
     blind user cannot investigate.
 
-    A value that exists but names a DIFFERENT command is reported as enabled with a message saying
-    so, never silently corrected. It usually means another copy of the app is set to start - a
-    second install, or one that moved - and quietly rewriting somebody's login behaviour to point at
-    us is not ours to do without saying it.
+    An entry that names a DIFFERENT command is reported as enabled with a message saying so, never
+    silently corrected. It usually means another copy of the app is set to start, a second install
+    or one that moved, and quietly rewriting somebody's login behaviour to point at us is not ours
+    to do without saying it.
     """
     exe = app_exe()
-    value = read_value()
+    value = current()
     if exe is None:
         return {"enabled": value is not None, "supported": False, "value": value,
                 "message": ("This copy is running from source rather than from an installed "
@@ -110,7 +69,7 @@ def state() -> dict:
                             "installed app can." if value is None else
                             "Something is set to start when you sign in, but this copy is running "
                             "from source and cannot change it.")}
-    want = command_for(exe)
+    want = command_for(exe, STARTUP_FLAG)
     if value is None:
         return {"enabled": False, "supported": True, "value": None,
                 "message": "AccessCaster does not start when you sign in."}
@@ -126,20 +85,18 @@ def set_enabled(on: bool) -> dict:
     """Turn autostart on or off for THIS user. {ok, enabled, message}."""
     exe = app_exe()
     if on and exe is None:
-        return {"ok": False, "enabled": read_value() is not None,
+        return {"ok": False, "enabled": current() is not None,
                 "message": ("This copy is running from source rather than from an installed "
                             "AccessCaster. Only the installed app can set itself to start when you sign "
                             "in, because the startup entry has to name a program that will still be "
                             "there.")}
     try:
-        import winreg
         if on:
-            with _open_run_key(True) as key:
-                winreg.SetValueEx(key, VALUE_NAME, 0, winreg.REG_SZ, command_for(exe))
+            install(command_for(exe, STARTUP_FLAG))
         else:
-            _delete_value(VALUE_NAME)   # already off; asking for what you have is not a failure
+            remove()   # already off; asking for what you have is not a failure
     except Exception as exc:
-        return {"ok": False, "enabled": read_value() is not None,
+        return {"ok": False, "enabled": current() is not None,
                 "message": f"Could not change the startup setting: {exc}"}
     return {"ok": True, "enabled": bool(on),
             "message": ("AccessCaster will start when you sign in, in the system tray. It does not "

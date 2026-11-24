@@ -341,7 +341,7 @@ def action_export_pad(pad: int) -> dict:
 
 
 def action_open_pad_exports() -> dict:
-    """Open the exports folder in Explorer, so the file can actually be used once it is copied."""
+    """Open the exports folder, so the file can actually be used once it is copied."""
     return folders.open_folder_reply(export_dir(), "The exports folder")
 
 

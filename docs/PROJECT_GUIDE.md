@@ -2321,17 +2321,17 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 - **A FAILED READ MUST SAY SO, not leave old numbers looking live.**
 
 - **AUTOSTART IS ONE REGISTRY VALUE WRITTEN BY TWO THINGS THAT CANNOT SHARE CODE**, and nothing at
-  runtime would notice them drifting: `ProjectBuilds/installer.iss` and `Project/autostart.py` must
+  runtime would notice them drifting: `ProjectBuilds/installer.iss` and `Project/win/autostart.py` must
   agree on the key, the value NAME and the command. A different name breaks the installer's
   `uninsdeletevalue`, so an uninstall leaves a Run entry pointing at a deleted exe - a startup error
-  every login with nothing left to turn it off. `DevTools/test_autostart.py` reads the `.iss` and
+  every login with nothing left to turn it off. `DevTools/test_win_autostart.py` reads the `.iss` and
   asserts it. **HKCU, never HKLM**: only one copy runs per PC (`instance.py`), so a machine-wide
   entry starts the app for every account and all but the first are refused (seen with one user at
   the console and another over Remote Desktop).
   **RENAMING THE APP MEANS MIGRATING WHAT LIVES ON THE USER'S MACHINE UNDER THE OLD NAME**: the Run
   value (two entries naming one exe start the app twice at sign-in), the Start Menu group and the
   desktop shortcut (Inno writes the new ones beside the old), each removed by `installer.iss` on
-  every install, NOT gated on the tasks the user ticks, and by `autostart.py` for the Run value. The
+  every install, NOT gated on the tasks the user ticks, and by `win/autostart.py` for the Run value. The
   "Access Caster" to "AccessCaster" migration is retired, both users being past it (5th November
   2026). **`UsePreviousGroup=no` stays**: Inno otherwise reuses the group name the machine
   remembers, and a renamed build writes its shortcuts into a folder still called by the old name.
@@ -2344,7 +2344,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   app's: measured, the foreground two seconds after the call was still AccessCaster. A window you
   were not moved to is indistinguishable from nothing having happened, and that is exactly how it
   was reported. Windows will not let a background process take the foreground unaided, so
-  `folders._open_folder_focused` borrows the input state of the window that has it
+  `win/folders.open_focused` borrows the input state of the window that has it
   (`AttachThreadInput`). Match the window on a title PREFIX: Explorer sets the folder name first and
   appends " - File Explorer" a moment later, so an equality test passes or fails on how fast the
   poll got there. Failing to focus is NOT failing to open, so everything after `startfile` swallows
@@ -2819,7 +2819,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   the LAST one is muted or faded down. That is why it can look like one particular fader is special:
   it is simply the only one in play. Worth knowing when a user reports silent monitors, because
   blind the cause is invisible and the obvious fix (mute the mic you are using) does not work.
-- **ONE COPY PER PC, AND THE LOCK IS A `Global\` NAMED MUTEX** (`instance.claim`), which every
+- **ONE COPY PER PC, AND THE LOCK IS A `Global\` NAMED MUTEX** (`win/instance.claim`), which every
   Windows session sees. The rest of the app belongs to ONE session, so a second signed-in account
   is REFUSED rather than served: the announcer speaks into the session that started it, the global
   shortcuts are registered there, the tray icon lives there and the settings written are that
