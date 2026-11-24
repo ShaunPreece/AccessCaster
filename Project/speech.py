@@ -4,7 +4,7 @@
 `tone` plays a cue on the same output. The voice, output and volume are the user's choice, held here
 and saved in settings.json.
 
-SAPI RENDERS, IT DOES NOT PLAY. A phrase is spoken into memory, its silence trimmed, and the samples
+SPEECH IS RENDERED, NOT SPOKEN. A phrase is spoken into memory, its silence trimmed, and the samples
 played by `wave_player` on a device held open between phrases. Spoken straight to the device, SAPI
 opens it for every phrase and its voices pad each one with silence (66 to 86 ms of zeros before the
 word on Hazel, 650 ms after), so in a fast run of phrases, a fader moving, each new number cuts
@@ -22,25 +22,26 @@ from dataclasses import dataclass
 
 import diagnostics
 import settings_file
+import speech_engine
 import tones
 import wave_player
 import wording
 
 enabled = threading.Event()
 
-# Which Windows output device announcements go to (a name from sapi_lists()); "" = the system
+# Which output device announcements go to (a name from speech_lists()); "" = the system
 # default. When the default output is the RODECaster, speech arrives on
 # USB 1 and is inaudible while another channel is SOLOed (the cue bus replaces the headphone feed)
 # or while USB 1 is muted. Pointing announcements at another device makes them survive both.
-# IT IS THE DEVICE OUR OWN PLAYER OPENS, NOT a Windows setting: it does not move the system default
+# IT IS THE DEVICE OUR OWN PLAYER OPENS, NOT a system setting: it does not move the system default
 # device, and it does not touch the screen reader, which has its own.
 chosen_output = ""
 
-# Which voice speaks them ("" = whatever SAPI's default is).
+# Which voice speaks them ("" = the system's default voice).
 chosen_voice = ""
 
 # How loud announcements are, 0-100. It scales our own samples, so it changes ONLY our speech:
-# Windows system volume, other apps and the desk's own audio are untouched. It exists because at
+# the system volume, other apps and the desk's own audio are untouched. It exists because at
 # full volume the announcer talks over what you are actually listening to while riding the faders.
 # Persisted, because a level you have to set again every launch is no use.
 _VOLUME_DEFAULT = 100
@@ -58,47 +59,37 @@ def clamp_volume(value) -> int:
 volume = _VOLUME_DEFAULT
 
 
-# WHAT SPEECH IS AVAILABLE. Both lists come from SAPI itself (the engine the speech thread renders
-# with, and whose output tokens it opens), so what the page offers is exactly what can be chosen:
-# no guessing from the registry, and nothing offered that the speech thread would then fail to find.
-# The lists are CACHED because reading them costs a COM round trip, and re-read on demand: plugging
-# in headphones adds an output, and installing a voice adds a voice, without restarting the app.
+# WHAT SPEECH IS AVAILABLE. Both lists come from the speech engine itself, the one the speech thread
+# renders with and whose outputs it opens, so what the page offers is exactly what can be chosen.
+# The lists are CACHED because reading them is slow, and re-read on demand: plugging in headphones
+# adds an output, and installing a voice adds a voice, without restarting the app.
 _lists_cache = {"voices": None, "outputs": None}
 _lists_lock = threading.Lock()
 
 
-def sapi_lists(refresh: bool = False) -> dict:
-    """{"voices": [...], "outputs": [...]} of SAPI names, or empty lists if speech is unavailable.
-
-    COM has to be initialised per THREAD, and this runs on whichever thread asks, so
-    CoInitialize/CoUninitialize wrap the call. A machine with no speech stack at all reports empty
-    lists rather than failing the caller: the announcer simply has nothing to choose from, and the
-    rest of the page still works."""
+def speech_lists(refresh: bool = False) -> dict:
+    """{"voices": [...], "outputs": [...]} by name, or empty lists if speech is unavailable. A
+    machine with no speech stack at all reports empty lists rather than failing the caller: the
+    announcer simply has nothing to choose from, and the rest of the page still works."""
     with _lists_lock:
         if not refresh and _lists_cache["voices"] is not None:
             return dict(_lists_cache)
         voices, outputs = [], []
         try:
-            import pythoncom  # noqa: PLC0415  (pywin32, Windows only)
-            import win32com.client  # noqa: PLC0415
-            pythoncom.CoInitialize()
-            try:
-                spv = win32com.client.Dispatch("SAPI.SpVoice")
-                voices = [t.GetDescription() for t in spv.GetVoices()]
-                outputs = [t.GetDescription() for t in spv.GetAudioOutputs()]
-            finally:
-                # EVERY COM reference has to be dropped BEFORE CoUninitialize, or the release
-                # happens on a thread with no apartment left and pywin32 prints "Win32 exception
-                # occurred releasing IUnknown". Harmless, but it is real noise in the log and the
-                # sort of thing that gets blamed for an unrelated fault later.
-                spv = None
-                pythoncom.CoUninitialize()
+            with speech_engine.apartment():
+                voices, outputs = _read_lists()
         except Exception as exc:
-            diagnostics.event("announcer.sapi_unread", "voices and outputs not listed",
+            diagnostics.event("announcer.voices_unread", "voices and outputs not listed",
                               error=str(exc))
         _lists_cache["voices"] = voices
         _lists_cache["outputs"] = outputs
         return dict(_lists_cache)
+
+
+def _read_lists() -> tuple:
+    """A function of its own so the Synth is gone before the apartment closes."""
+    synth = speech_engine.Synth(tones.SAMPLE_RATE)
+    return synth.voice_names(), synth.output_names()
 
 
 # NOTHING IS EVER PLAYED OUT LOUD UNDER THIS FLAG, set by `DevTools/_bootstrap` for any script
@@ -156,15 +147,9 @@ def _release(item: _Item | None) -> None:
 
 
 class _Engine:
-    """SAPI rendering into memory and a held-open player, both owned by the speech thread."""
+    """Speech rendered into memory and a held-open player, both owned by the speech thread."""
 
     SAMPLE_RATE = tones.SAMPLE_RATE
-    _RATE = 3                       # SAPI rate, -10 (slow) .. 10 (fast)
-    # SpeechAudioFormatType SAFT22kHz16BitMono.
-    _FORMAT_22K_16BIT_MONO = 22
-    # Speak flag: never parse the text as SAPI XML, so a channel name containing "<" is read as
-    # written.
-    _IS_NOT_XML = 16
     # Peak sample level, of 32767, where a word starts (about -42 dBFS). A word opening on a plosive
     # carries 140 to 170 ms of near-silence peaking near 100 before the burst, while soft sounds
     # (the "f" of "fader", the "s" of "solo") reach several hundred.
@@ -176,8 +161,7 @@ class _Engine:
     _TAIL = SAMPLE_RATE * 20 // 1000
 
     def __init__(self):
-        self._voice = None
-        self._format = None
+        self._synth = None
         self._gen = None
         self._output = ""
         self._device_id = wave_player.DEFAULT_DEVICE
@@ -202,42 +186,33 @@ class _Engine:
 
     def reset(self) -> None:
         """Drop the voice and the device after a failure, so the next phrase starts afresh."""
-        self._voice = None
+        self._synth = None
         self._gen = None
         self._player.close()
 
     def _configure(self) -> None:
         """Take up a changed voice or output before the next phrase."""
         gen = config_gen
-        if self._voice is not None and self._gen == gen:
+        if self._synth is not None and self._gen == gen:
             return
-        import win32com.client  # noqa: PLC0415  (pywin32, Windows only)
         voice, self._output = chosen_voice, chosen_output
-        spv = win32com.client.Dispatch("SAPI.SpVoice")
-        spv.Rate = self._RATE
+        synth = speech_engine.Synth(self.SAMPLE_RATE)
         if voice:
-            token = _token(spv.GetVoices(), voice)
-            if token is not None:
-                spv.Voice = token
+            name = _pick(voice, synth.voice_names())
+            if name:
+                synth.use_voice(name)
             else:
                 diagnostics.event("announcer.voice_missing", voice, using="the default voice")
-        self._format = win32com.client.Dispatch("SAPI.SpAudioFormat")
-        self._format.Type = self._FORMAT_22K_16BIT_MONO
-        self._voice = spv
+        self._synth = synth
         self._gen = gen
         self._player.close()            # the next phrase opens the output now chosen
 
     def _resolve_output(self) -> int:
-        return _output_device(self._voice, self._output)
+        return _output_device(self._synth, self._output)
 
     def _render(self, text: str) -> bytes:
         """`text` spoken into memory, with the voice's silence trimmed from both ends."""
-        import win32com.client  # noqa: PLC0415
-        stream = win32com.client.Dispatch("SAPI.SpMemoryStream")
-        stream.Format = self._format
-        self._voice.AudioOutputStream = stream
-        self._voice.Speak(text, self._IS_NOT_XML)
-        samples = array.array("h", bytes(stream.GetData()))
+        samples = array.array("h", self._synth.render(text))
         first = next((i for i, s in enumerate(samples) if abs(s) > self._ONSET), None)
         if first is None:
             return b""
@@ -262,25 +237,16 @@ class _Engine:
         return self._cues[path]
 
 
-def _output_device(voice, output: str) -> int:
-    """The waveOut id of `output`, through `voice`, a SAPI SpVoice. Resolved at every open, because
-    the id is a position in Windows' current device list and moves when a device is plugged in or
-    removed. SAPI's output token creates an SpMMAudioOut, whose DeviceId is that waveOut id."""
+def _output_device(synth, output: str):
+    """The player's device for `output`, through `synth`, resolved at every open because a device
+    plugged in or removed can move it."""
     if not output:
         return wave_player.DEFAULT_DEVICE
-    token = _token(voice.GetAudioOutputs(), output)
-    if token is None:
+    name = _pick(output, synth.output_names())
+    if not name:
         diagnostics.event("announcer.output_missing", output, using="the system default")
         return wave_player.DEFAULT_DEVICE
-    return int(token.CreateInstance().DeviceId)
-
-
-def _token(tokens, wanted: str):
-    """The SAPI token `_pick` resolves `wanted` to, or None."""
-    tokens = list(tokens)
-    names = [t.GetDescription() for t in tokens]
-    name = _pick(wanted, names)
-    return tokens[names.index(name)] if name else None
+    return synth.output_device(name)
 
 
 def _scaled(pcm: bytes, percent: int) -> bytes:
@@ -297,9 +263,12 @@ def _scaled(pcm: bytes, percent: int) -> bytes:
 
 def _speech_thread() -> None:
     """Play whatever is newest, one item at a time, and close the device once speech goes quiet."""
-    import pythoncom  # noqa: PLC0415
+    with speech_engine.apartment():
+        _speak_until_stopped()
+
+
+def _speak_until_stopped() -> None:
     global _pending
-    pythoncom.CoInitialize()
     engine = _Engine()
     while not _stopping.is_set():
         if not _wake.wait(1.0):
@@ -321,7 +290,6 @@ def _speech_thread() -> None:
         finally:
             _release(item)
     engine.reset()
-    pythoncom.CoUninitialize()
 
 
 def stop() -> None:
@@ -437,25 +405,26 @@ class Loop:
         self._cut.set()
 
     def _run(self, path: str, delay_s: float) -> None:
-        import pythoncom  # noqa: PLC0415
         if self._stopped.wait(delay_s):
             self._cut.close()
             return
-        pythoncom.CoInitialize()
         player = wave_player.Player(tones.SAMPLE_RATE)
         try:
-            with wave.open(path, "rb") as w:
-                pcm = _scaled(w.readframes(w.getnframes()), volume)
-            import win32com.client  # noqa: PLC0415
-            device = _output_device(win32com.client.Dispatch("SAPI.SpVoice"), chosen_output)
-            while pcm and not self._stopped.is_set() and player.play(pcm, device, self._cut):
-                pass
+            with speech_engine.apartment():
+                self._play_until_stopped(player, path)
         except Exception as exc:
             diagnostics.event("announcer.loop_failed", str(exc))
         finally:
             player.close()
             self._cut.close()
-            pythoncom.CoUninitialize()
+
+    def _play_until_stopped(self, player, path: str) -> None:
+        """A method of its own so the Synth is gone before the apartment closes."""
+        with wave.open(path, "rb") as w:
+            pcm = _scaled(w.readframes(w.getnframes()), volume)
+        device = _output_device(speech_engine.Synth(tones.SAMPLE_RATE), chosen_output)
+        while pcm and not self._stopped.is_set() and player.play(pcm, device, self._cut):
+            pass
 
 
 def start_loop(name: str, delay_s: float = 0.0) -> Loop | None:
@@ -473,7 +442,7 @@ def start_loop(name: str, delay_s: float = 0.0) -> Loop | None:
 
 def action_set_announce_volume(percent: int) -> dict:
     """How loud announcements are. It scales our own samples, so this changes OUR speech only and
-    never Windows volume, another app, or the desk's audio. The confirmation is spoken, which is the
+    never the system volume, another app, or the desk's audio. The confirmation is spoken, which is the
     point: it arrives at the new level, so you hear what you have chosen straight away."""
     global volume
     volume = clamp_volume(percent)
@@ -486,11 +455,11 @@ def action_set_announce_volume(percent: int) -> dict:
 
 
 def _pick(value: str, offered: list) -> str | None:
-    """Resolve what the page sent against what SAPI actually offers. An exact name wins; failing
+    """Resolve what the page sent against what the system actually offers. An exact name wins; failing
     that a case-insensitive substring is accepted, so a shortened name ("Zira", "Realtek") still
     works from a script or an older saved setting. Anything else is rejected rather than passed to
     the speech thread, where it would silently fall back to the default and look like the setting
-    was ignored. "" means "leave it to Windows"."""
+    was ignored. "" means "leave it to the system"."""
     value = (value or "").strip()
     if not value:
         return ""
@@ -511,7 +480,7 @@ def action_set_announce_voice(voice: str) -> dict:
 
 
 def action_set_announce_output(output: str) -> dict:
-    """Which Windows output announcements play through. THIS IS OUR SPEECH ONLY: it is the device
+    """Which output announcements play through. THIS IS OUR SPEECH ONLY: it is the device
     our own player opens, so it does not move the system default device, and it does not touch the
     screen reader or any other program. It exists because the default output is often
     the RODECaster itself, and then announcements vanish the moment another channel is soloed."""
@@ -523,7 +492,7 @@ def _choose(kind: str, wanted: str) -> dict:
     the new voice on the new output. "" is the default."""
     global chosen_voice, chosen_output, config_gen
     voice = kind == "voice"
-    picked = _pick(wanted, sapi_lists()["voices" if voice else "outputs"])
+    picked = _pick(wanted, speech_lists()["voices" if voice else "outputs"])
     if picked is None:
         return {"ok": False, kind: chosen_voice if voice else chosen_output,
                 "message": (f"This computer has no speech voice called {wanted}." if voice else
@@ -544,9 +513,9 @@ def _choose(kind: str, wanted: str) -> dict:
 
 
 def action_refresh_speech_devices() -> dict:
-    """Re-read the voice and output lists from SAPI. Plugging in headphones or installing a voice
+    """Re-read the voice and output lists from the speech engine. Plugging in headphones or installing a voice
     changes them, and neither is worth restarting the app for."""
-    lists = sapi_lists(refresh=True)
+    lists = speech_lists(refresh=True)
     return {"ok": True, "voices": lists["voices"], "outputs": lists["outputs"],
             "message": f"{wording.count(len(lists['voices']), 'voice')} and "
                        f"{wording.count(len(lists['outputs']), 'output')} found."}

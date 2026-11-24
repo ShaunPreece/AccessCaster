@@ -27,7 +27,7 @@ import wording
 
 def read_announce() -> dict:
     """Every announcement setting, and the voices and outputs this computer offers."""
-    lists = speech.sapi_lists()
+    lists = speech.speech_lists()
     return {"ok": True, "on": speech.enabled.is_set(), "levels": announcer.levels_on,
             "mute_tones": announcer.mute_tones, "record_feedback": announcer.record_feedback,
             "remember": announcer.remember,
@@ -77,7 +77,7 @@ def _available() -> dict:
     because we failed to enumerate would be the wrong way round."""
     out = {}
     try:
-        lists = speech.sapi_lists()
+        lists = speech.speech_lists()
         # Only offer a list we actually got. Over Remote Desktop, SAPI enumeration fails with
         # 0x80045039 and both come back empty, and an empty list must NOT be read as "this
         # computer has no voices, so refuse the setting" - it means we could not tell.

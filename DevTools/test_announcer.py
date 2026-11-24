@@ -990,7 +990,7 @@ with patched((rcp_transfer, {"send_record": sent}), (announcer, {"live_state": N
     # The voice, output and configuration generation are patched with their own values, so whatever the
     # checks below change is put back.
     with patched((speech, {
-            "sapi_lists": lambda refresh=False: {
+            "speech_lists": lambda refresh=False: {
                 "voices": ["Microsoft Hazel Desktop - English (Great Britain)",
                            "Microsoft Zira Desktop - English (United States)"],
                 "outputs": ["Speakers (RODECaster Pro II Main Stereo)",

@@ -171,6 +171,7 @@ with as_device(devices.PRO2), patched(
         (soundpad, {"safe_assign_fx_recipe": fake_safe,
                     "assign_create_fx_recipe": lambda *_a, **_k: safe_calls.append("bypass"),
                     "_position_of": lambda idx: (None, None, None),
+                    "unlatch_all": lambda blob=None: [],
                     "create_mixer": lambda grid, mode: {"created": True},
                     "pool_health": lambda *_a, **_k: {"clean": True},
                     "_health_message": lambda health: ""}),
@@ -184,6 +185,7 @@ with as_device(devices.PRO2), patched(
         (soundpad, {"safe_assign_fx_recipe": lambda *_a, **_k: {
                         "ok": False, "health": {"clean": False}, "objects_for_pad": 2},
                     "_position_of": lambda idx: (None, None, None),
+                    "unlatch_all": lambda blob=None: [],
                     "create_mixer": lambda grid, mode: {"created": True},
                     "pool_health": lambda *_a, **_k: {"clean": False},
                     "_health_message": lambda health: "Pad pool needs a rebuild."}),
