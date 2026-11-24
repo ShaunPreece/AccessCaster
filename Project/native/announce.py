@@ -5,8 +5,8 @@ keeps for the purpose, and `name` is what a reader calls the source. `say(text, 
 speaks a line, queued behind what is being read, or with `recent` replacing an older line not yet
 spoken. `close()` must run before `window` is destroyed.
 
-Each platform supplies its own Notifier. macOS's is a stand-in that drops every line; on any
-other platform this import fails rather than leaving the window silent.
+Each platform supplies its own Notifier; on any other platform this import fails rather than
+leaving the window silent.
 """
 import sys
 
