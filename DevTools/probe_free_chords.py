@@ -20,8 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import hotkeys
-
-_user32 = hotkeys._user32         # with RegisterHotKey's signature declared
+from win import hotkeys as win_hotkeys
 
 CHORDS = [
     ("ctrl", "alt", "win"),
@@ -44,9 +43,9 @@ def free(mods, key: str) -> bool:
     flags, vk, _tidy, problem = hotkeys.parse_binding(list(mods), key)
     if problem:
         return False
-    if not _user32.RegisterHotKey(None, 0xBEEF, flags, vk):
+    if not win_hotkeys._user32.RegisterHotKey(None, 0xBEEF, flags | win_hotkeys.MOD_NOREPEAT, vk):
         return False
-    _user32.UnregisterHotKey(None, 0xBEEF)
+    win_hotkeys._user32.UnregisterHotKey(None, 0xBEEF)
     return True
 
 

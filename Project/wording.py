@@ -41,6 +41,14 @@ def join_and(items) -> str:
     return ", ".join(items[:-1]) + " and " + items[-1]
 
 
+def join_or(items) -> str:
+    """A spoken choice: "A", "A or B", "A, B or C". Empty gives ""."""
+    items = list(items)
+    if len(items) <= 1:
+        return items[0] if items else ""
+    return ", ".join(items[:-1]) + " or " + items[-1]
+
+
 def describe_duration(seconds) -> str:
     """A length said the way a person says it. Never "0:07.3": a screen reader reads punctuation
     and a decimal, and neither carries meaning here. The smaller unit is dropped when it is zero,

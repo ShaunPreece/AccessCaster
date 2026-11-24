@@ -1,4 +1,4 @@
-"""AccessCaster - global keyboard shortcuts (system-wide hotkeys).
+"""Global keyboard shortcuts (system-wide hotkeys).
 
 WHAT THIS IS FOR. Some things you want from the desk are things you want NOW, from whatever app you
 are in: turn the announcer off because it is talking over a guest, mute every mic because you are
@@ -6,17 +6,14 @@ about to cough, start the recording. Opening the window and finding the control 
 for all three. A global hotkey works while the window is closed and while another application has
 focus, which is exactly the case the rest of this app cannot serve.
 
-Windows' own RegisterHotKey is the mechanism, and it has two properties worth having: the OS owns
-the binding, so no keyboard hook and no key logging is involved, and a combination another program
-already owns is REFUSED at registration rather than silently stolen. See `_apply_now` for what we
-do with that refusal.
+The system's own hotkey registration is the mechanism, and it has two properties worth having: the
+OS owns the binding, so no keyboard hook and no key logging is involved, and a combination another
+program already owns is REFUSED at registration rather than silently stolen. See `_apply_now` for
+what we do with that refusal.
 
-THE THREAD. RegisterHotKey delivers WM_HOTKEY to the THREAD that registered it, and only while that
-thread pumps messages. So this module owns one daemon thread that registers everything and then sits
-in GetMessage. Everything from outside (start, stop, re-bind) is marshalled onto it by posting a
-message, because registering from another thread would deliver the hotkeys to that thread instead.
-Actions run on a short-lived worker thread, never on the pump: a device write costs about a second
-and a stalled pump would swallow the next press.
+THE THREAD. Registration and delivery happen on one thread the platform's `Pump` owns. Actions run
+on a short-lived worker thread, never on the pump: a device write costs about a second and a
+stalled pump would swallow the next press.
 
 ACCESSIBILITY RULES, and they are the reason for the validation in `parse_binding`:
 
@@ -27,7 +24,7 @@ ACCESSIBILITY RULES, and they are the reason for the validation in `parse_bindin
     DEFAULT_MODS for why it is not Ctrl+Alt+Windows). It stays clear of NVDA's Insert and Caps Lock
     layers, JAWS' Insert layer and Narrator's Caps Lock layer, so the shortcuts do not have to be
     re-learnt per screen reader.
-  - MOD_NOREPEAT is always set. Without it, holding a key fires the action over and over.
+  - A held key fires ONCE. Without that, holding a key fires the action over and over.
   - EVERY ACTION SPEAKS ITS RESULT, UNLESS THAT SHORTCUT IS SET TO STAY QUIET. When a hotkey fires,
     focus is in another application, so the window cannot report anything: the spoken reply is
     normally the only feedback there is. But the case the announcer shortcut exists for is realising
@@ -36,52 +33,36 @@ ACCESSIBILITY RULES, and they are the reason for the validation in `parse_bindin
     shortcut carries its own `speak` flag. A shortcut that FAILED still speaks: the flag silences a
     confirmation, not an error, because the whole point of silencing is that the thing worked.
 
-This module is deliberately device-agnostic: it knows about keys, modifiers and Windows, and nothing
-about the RODECaster. The actions themselves are registered by shortcuts.py.
+This module is deliberately device-agnostic: it knows about keys and modifiers, and nothing about
+the RODECaster. The actions themselves are registered by shortcuts.py.
+
+The platform supplies:
+  - `MODIFIERS`: [(id, label, flag)] in the order a combination is spoken and written, for the ids
+    "ctrl", "alt", "win" and "shift", which are what the settings file stores.
+  - `KEY_CODES`: {key name: the system's code for it}, for every name in `KEYS`.
+  - `Pump(apply, press)`: the thread hotkeys are registered and delivered on. `start()` begins it
+    and returns once `apply()` has run on it; `request_apply()` runs `apply()` there again;
+    `stop()` unregisters everything and ends it; `running()` and `on_pump()` say whether it is
+    alive and whether the caller is it. Only on the pump, `register(hotkey_id, flags, code)` (False
+    when the system refuses the combination) and `unregister_all()`. `press(hotkey_id)` is called
+    on the pump when a registered combination is pressed; a held key calls it once.
 """
 
 from __future__ import annotations
 
-import ctypes
+import sys
 import threading
-from ctypes import wintypes
 
-from wording import join_and
+from wording import OS_NAME, join_and, join_or
 
-# --- Win32 constants ----------------------------------------------------------------------------
-MOD_ALT = 0x0001
-MOD_CONTROL = 0x0002
-MOD_SHIFT = 0x0004
-MOD_WIN = 0x0008
-MOD_NOREPEAT = 0x4000            # a held key fires ONCE (Windows 7+)
-
-WM_HOTKEY = 0x0312
-WM_APP = 0x8000
-_WM_RELOAD = WM_APP + 1          # posted to the pump: re-register from the current bindings
-_WM_STOP = WM_APP + 2            # posted to the pump: unregister everything and end
-
-_user32 = ctypes.WinDLL("user32", use_last_error=True)
-_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-_user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
-_user32.RegisterHotKey.restype = wintypes.BOOL
-_user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
-_user32.UnregisterHotKey.restype = wintypes.BOOL
-_user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND,
-                                wintypes.UINT, wintypes.UINT]
-_user32.GetMessageW.restype = ctypes.c_int
-_user32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT,
-                                       wintypes.WPARAM, wintypes.LPARAM]
-_user32.PostThreadMessageW.restype = wintypes.BOOL
+if sys.platform == "win32":
+    from win.hotkeys import KEY_CODES, MODIFIERS, Pump
+else:
+    raise ImportError(f"No global hotkeys for {sys.platform}: the Windows one is win/hotkeys.py")
 
 # --- What can be bound --------------------------------------------------------------------------
-# The modifier list is ORDERED, and the order is how a combination is spoken and written down, so
-# "Ctrl, Alt, Windows and A" reads the same everywhere in the app.
-MODIFIERS = [
-    ("ctrl", "Ctrl", MOD_CONTROL),
-    ("alt", "Alt", MOD_ALT),
-    ("win", "Windows", MOD_WIN),
-    ("shift", "Shift", MOD_SHIFT),
-]
+# The platform's MODIFIERS list is ORDERED, and the order is how a combination is spoken and
+# written down, so "Ctrl, Alt, Windows and A" reads the same everywhere in the app.
 _MOD_FLAG = {name: flag for name, _label, flag in MODIFIERS}
 # A modifier that is enough ON ITS OWN to make a combination safe to take from the whole system.
 # Shift is not in here on purpose: Shift+A is a capital A.
@@ -116,34 +97,31 @@ KEY_DASH = "Dash"
 KEY_EQUALS = "Equals"
 
 
-def _key_table() -> list:
-    """[(name, virtual-key code)] of every key the app offers, in the order the chooser lists them.
+def _key_names() -> list:
+    """Every key the app offers, in the order the chooser lists them.
 
     Letters and digits first because that is what anyone reaches for; then the function keys; then
     the navigation and numeric-pad keys, which are worth offering for the level-style shortcuts that
     will want a pair (up and down) rather than a single press."""
-    keys = [(chr(c), c) for c in range(ord("A"), ord("Z") + 1)]
-    keys += [(chr(c), c) for c in range(ord("0"), ord("9") + 1)]
+    keys = [chr(c) for c in range(ord("A"), ord("Z") + 1)]
+    keys += [chr(c) for c in range(ord("0"), ord("9") + 1)]
     # Straight after the digits, because that is where they are on the keyboard and where the pad
     # scheme puts them: the number row plays the pads and these two step the bank.
-    keys += [(KEY_DASH, 0xBD), (KEY_EQUALS, 0xBB)]      # VK_OEM_MINUS / VK_OEM_PLUS
-    keys += [(f"F{n}", 0x70 + n - 1) for n in range(1, 13)]
-    keys += [
-        ("Space", 0x20), ("Enter", 0x0D), ("Backspace", 0x08), ("Tab", 0x09),
-        ("Left arrow", 0x25), ("Up arrow", 0x26), ("Right arrow", 0x27), ("Down arrow", 0x28),
-        ("Home", 0x24), ("End", 0x23), ("Page up", 0x21), ("Page down", 0x22),
-        ("Insert", 0x2D), ("Delete", 0x2E),
-    ]
+    keys += [KEY_DASH, KEY_EQUALS]
+    keys += [f"F{n}" for n in range(1, 13)]
+    keys += ["Space", "Enter", "Backspace", "Tab",
+             "Left arrow", "Up arrow", "Right arrow", "Down arrow",
+             "Home", "End", "Page up", "Page down", "Insert", "Delete"]
     # The numpad is OFFERED and deliberately absent from every shipped default: the scheme must not
     # use numpad keys, which is not the same as nobody being allowed to bind one.
-    keys += [(f"Numpad {n}", 0x60 + n) for n in range(10)]
-    keys += [("Numpad plus", 0x6B), ("Numpad minus", 0x6D), ("Numpad star", 0x6A),
-             ("Numpad slash", 0x6F)]
+    keys += [f"Numpad {n}" for n in range(10)]
+    keys += ["Numpad plus", "Numpad minus", "Numpad star", "Numpad slash"]
     return keys
 
 
-KEYS = _key_table()
-_KEY_VK = {name: vk for name, vk in KEYS}
+# [(name, the system's code)]
+KEYS = [(name, KEY_CODES[name]) for name in _key_names()]
+_KEY_CODE = dict(KEYS)
 
 
 def combo_text(mods, key: str) -> str:
@@ -157,7 +135,7 @@ def combo_text(mods, key: str) -> str:
 
 
 def parse_binding(mods, key: str):
-    """Validate a binding and return (mod_flags, vk, tidy_mods, message).
+    """Validate a binding and return (mod_flags, key_code, tidy_mods, message).
 
     message is "" when the binding is good, and a sentence saying what is wrong when it is not. The
     caller shows that sentence: a shortcut that quietly fails to register is worse than no shortcut,
@@ -166,16 +144,17 @@ def parse_binding(mods, key: str):
     wanted = [m for m in (mods or []) if m in _MOD_FLAG]
     # Keep our own order, not the order the caller happened to send.
     tidy = [name for name, _label, _flag in MODIFIERS if name in wanted]
-    if key not in _KEY_VK:
+    if key not in _KEY_CODE:
         return 0, 0, tidy, f"{key or 'That'} is not a key this app can use for a shortcut."
     if not any(m in tidy for m in _STRONG_MODS):
-        return 0, 0, tidy, ("A shortcut needs Ctrl, Alt or Windows in it. Without one of those it "
+        strong = [label for name, label, _flag in MODIFIERS if name in _STRONG_MODS]
+        return 0, 0, tidy, (f"A shortcut needs {join_or(strong)} in it. Without one of those it "
                             "would take that key away from every other program on this computer, "
                             "including your screen reader.")
-    flags = MOD_NOREPEAT
+    flags = 0
     for m in tidy:
         flags |= _MOD_FLAG[m]
-    return flags, _KEY_VK[key], tidy, ""
+    return flags, _KEY_CODE[key], tidy, ""
 
 
 # COMMANDS THAT MUST RUN ON THE PUMP THREAD, because they need the foreground right that the
@@ -188,7 +167,7 @@ def parse_binding(mods, key: str):
 # is the foreground window and holds the keyboard focus, but no activation event is raised, so a
 # screen reader goes on reading the app the user came from.
 #
-# So the raise runs INLINE, in the WM_HOTKEY handler, where the right still exists. Everything
+# So the raise runs INLINE, on the pump as the press is delivered, where the right still exists. Everything
 # else keeps its own thread: a device write takes seconds and would block the next press.
 _FOREGROUND_COMMANDS = ("app.window",)
 
@@ -201,8 +180,8 @@ class HotkeyManager:
     holds none: it holds shortcuts, and calls out to a RUNNER and a LABELLER given to it.
 
     Each shortcut is {"id", "command", "mods", "key", "enabled", "speak"}. The id is ours and only
-    has to be unique; the command is the caller's string and is opaque here. Pure Windows plumbing:
-    nothing in this file knows what a RODECaster is.
+    has to be unique; the command is the caller's string and is opaque here. Nothing in this file
+    knows what a RODECaster is.
 
     ONE CHORD FOR EVERY SHORTCUT: `_mods`, the keys held, is a single setting, and a shortcut's own
     "mods" always equals it once set_mods has run. A settings file from before the shared chord can
@@ -219,9 +198,8 @@ class HotkeyManager:
         self._lock = threading.Lock()
         self._enabled = True          # the master switch; off unregisters everything
         self._mods = list(DEFAULT_MODS)   # the chord every shortcut is held on
-        self._thread = None
-        self._tid = 0
-        self._ready = threading.Event()
+        self._pump = Pump(self._apply_now, self._pressed)
+        self._registered = {}         # hotkey id -> shortcut id; touched only on the pump
         # reload() waits for the pump to apply its request, so a caller reading `_status` straight
         # afterwards sees the result of ITS binding rather than the previous one.
         self._applied = threading.Condition()
@@ -372,7 +350,7 @@ class HotkeyManager:
                      and sorted(s.get("mods") or []) == want), None)
 
     def _refused_sentence(self) -> str:
-        """How many shortcuts Windows refused, and which, or "" when it refused none."""
+        """How many shortcuts the system refused, and which, or "" when it refused none."""
         with self._lock:
             refused = [s for s in self._shortcuts if self._status.get(s["id"])]
         if not refused:
@@ -448,7 +426,7 @@ class HotkeyManager:
     def set_mods(self, mods) -> dict:
         """Move EVERY shortcut to a new chord. Two shortcuts that end up on the same combination
         (possible only for ones that were on different modifiers before) keep the first and switch
-        the later one off, and Windows refusing a combination is reported per shortcut, so the
+        the later one off, and the system refusing a combination is reported per shortcut, so the
         result says exactly what is not working rather than "done"."""
         tidy = [n for n, _l, _f in MODIFIERS if n in (mods or [])]
         _flags, _vk, _tidy, problem = parse_binding(tidy, "A")
@@ -488,7 +466,7 @@ class HotkeyManager:
 
     def _clash(self, shortcut_id: str, mods, key: str):
         """The LABEL of another shortcut already on this combination, or None. Our own clash, caught
-        before Windows sees it: Windows would just refuse the second registration and the error
+        before the system sees it: it would just refuse the second registration and the error
         would blame "another program" when the other program is us."""
         with self._lock:
             holder = self._holder(key, mods, except_id=shortcut_id)
@@ -511,7 +489,7 @@ class HotkeyManager:
                 "problem": status.get(s["id"], ""),
             })
         return {"ok": True, "enabled": enabled,
-                "running": bool(self._thread and self._thread.is_alive()),
+                "running": self._pump.running(),
                 "shortcuts": out,
                 "mods": list(self._mods),
                 "default_mods": list(DEFAULT_MODS),
@@ -520,72 +498,45 @@ class HotkeyManager:
 
     # -- the pump thread -------------------------------------------------------------------------
     def start(self) -> None:
-        if self._thread and self._thread.is_alive():
-            return
-        self._ready.clear()
-        self._thread = threading.Thread(target=self._pump, name="hotkeys", daemon=True)
-        self._thread.start()
-        self._ready.wait(timeout=5.0)
+        self._pump.start()
 
     def stop(self) -> None:
-        self._post(_WM_STOP)
+        self._pump.stop()
 
     def reload(self) -> None:
         """Re-register from the current list and wait for the pump to finish doing it. Safe to call
         from any thread and before the pump has started: without a live pump there is nothing
         registered to fix."""
-        if not (self._tid and self._thread and self._thread.is_alive()):
+        if not self._pump.running():
             return
         with self._applied:
             self._requested_gen += 1
             target = self._requested_gen
-        self._post(_WM_RELOAD)
-        if threading.get_ident() == self._thread.ident:
+        self._pump.request_apply()
+        if self._pump.on_pump():
             return                            # on the pump itself: it applies after this returns
         with self._applied:
             self._applied.wait_for(lambda: self._applied_gen >= target, timeout=2.0)
 
-    def _post(self, message: int) -> None:
-        if self._tid and self._thread and self._thread.is_alive():
-            _user32.PostThreadMessageW(self._tid, message, 0, 0)
+    def _pressed(self, hotkey_id: int) -> None:
+        sid = self._registered.get(hotkey_id)
+        if sid:
+            self._fire(sid)
 
-    def _pump(self) -> None:
-        self._tid = _kernel32.GetCurrentThreadId()
-        registered = {}                       # hotkey id -> shortcut id
-        self._apply_now(registered)
-        self._ready.set()
-        msg = wintypes.MSG()
-        while True:
-            got = _user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
-            if got in (0, -1):                # WM_QUIT, or an error we cannot recover from
-                break
-            if msg.message == WM_HOTKEY:
-                sid = registered.get(int(msg.wParam))
-                if sid:
-                    self._fire(sid)
-            elif msg.message == _WM_RELOAD:
-                self._apply_now(registered)
-            elif msg.message == _WM_STOP:
-                break
-        for hk_id in list(registered):
-            _user32.UnregisterHotKey(None, hk_id)
-        registered.clear()
-        self._tid = 0
-
-    def _apply_now(self, registered: dict) -> None:
+    def _apply_now(self) -> None:
         """Unregister everything and register what the list now says. ONLY called on the pump thread
         (see the module docstring). Rebuilding wholesale rather than diffing is deliberate: there
         are a handful of hotkeys, the call is microseconds, and a diff is where the
         stale-registration bugs would live.
 
-        A registration Windows REFUSES is recorded against the shortcut that caused it and shown on
-        the page. That is the whole reason RegisterHotKey is the right mechanism: the clash is
+        A registration the system REFUSES is recorded against the shortcut that caused it and shown on
+        the page. That is the whole reason system registration is the right mechanism: the clash is
         reported at binding time instead of the shortcut silently doing nothing when you press
         it."""
         with self._applied:
             gen = self._requested_gen
-        for hk_id in list(registered):
-            _user32.UnregisterHotKey(None, hk_id)
+        self._pump.unregister_all()
+        registered = self._registered
         registered.clear()
         with self._lock:
             enabled = self._enabled
@@ -600,17 +551,18 @@ class HotkeyManager:
             if not s.get("enabled"):
                 status[sid] = ""              # off by choice is not a problem to report
                 continue
-            flags, vk, _tidy, problem = parse_binding(s.get("mods"), s.get("key", ""))
+            flags, code, _tidy, problem = parse_binding(s.get("mods"), s.get("key", ""))
             if problem:
                 status[sid] = problem
                 continue
             hk_id = i + 1
-            if _user32.RegisterHotKey(None, hk_id, flags, vk):
+            if self._pump.register(hk_id, flags, code):
                 registered[hk_id] = sid
                 status[sid] = ""
             else:
-                status[sid] = (f"Windows would not accept {combo_text(s.get('mods'), s.get('key'))}: "
-                               f"another program is already using it. Choose a different key.")
+                status[sid] = (f"{OS_NAME} would not accept "
+                               f"{combo_text(s.get('mods'), s.get('key'))}: another program is "
+                               f"already using it. Choose a different key.")
         with self._lock:
             self._status = status
         with self._applied:

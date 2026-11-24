@@ -1,6 +1,6 @@
 """Run each hotkey ACTION against the real desk and print the sentence it would speak.
 
-The Win32 half is covered by DevTools/test_hotkeys.py (no desk needed). This is the other half: the
+The Win32 half is covered by DevTools/test_win_hotkeys.py (no desk needed). This is the other half: the
 actions themselves, which compose the app's own writes and then have to describe what happened in
 one spoken line. A wrong field name here does not crash anything - it comes out of the speakers as a
 Python error - so it is worth reading the sentences once.

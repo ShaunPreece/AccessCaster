@@ -8,22 +8,22 @@ registered combination, and they cost the machine's keyboard: a run killed betwe
 release leaves Ctrl or Shift held down in every application. Delivery is checked by hand instead,
 by pressing a real shortcut.
 
-Run:  python DevTools/test_hotkeys.py
+Run:  python DevTools/test_win_hotkeys.py
 """
 
-import ctypes
 import sys
 import time
 
 import _bootstrap  # noqa: F401  (puts Project/ on sys.path)
 import _testkit
 import hotkeys
+from win import hotkeys as win_hotkeys
 from _testkit import check_true
 
 
 def post(mgr, hotkey_id):
     """Fire a shortcut the way Windows does, by posting WM_HOTKEY to the pump thread."""
-    ctypes.windll.user32.PostThreadMessageW(mgr._tid, hotkeys.WM_HOTKEY, hotkey_id, 0)
+    mgr._pump._post(win_hotkeys.WM_HOTKEY, hotkey_id)
 
 
 def main():

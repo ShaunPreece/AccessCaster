@@ -1,7 +1,7 @@
 """Press a real key combination on this machine, so a global hotkey can be TESTED.
 
 Why it exists: a shortcut registered with RegisterHotKey can only be proven by an ACTUAL key press.
-Posting WM_HOTKEY at the pump (DevTools/test_hotkeys.py does that) proves the dispatch and the
+Posting WM_HOTKEY at the pump (DevTools/test_win_hotkeys.py does that) proves the dispatch and the
 action, but not the registration - the part where Windows decides whether we own that combination.
 
 USES keybd_event, NOT SendInput. From an RDP session a correctly formed SendInput call (INPUT 32

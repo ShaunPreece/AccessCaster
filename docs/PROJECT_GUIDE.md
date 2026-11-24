@@ -3167,7 +3167,7 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
   stale map silently fires a stranger's voice effect onto a live mic.
 - **`shortcuts.manager()` is LAZY.** Importing a module must never register a system-wide hotkey.
   Only `service.start` asks, and never for a DevTools run.
-- **`test_hotkeys.py` PRESSES NO KEYS, AND MUST NOT AGAIN.** It fires shortcuts by posting
+- **`test_win_hotkeys.py` PRESSES NO KEYS, AND MUST NOT AGAIN.** It fires shortcuts by posting
   WM_HOTKEY to the pump. Injected presses proved only that Windows delivers a registered key, which
   any real press shows, and a run killed between a press and its release left Ctrl and Shift held
   down system-wide on the machine in use. `DevTools/press_keys.py` uses `keybd_event`, not
