@@ -116,6 +116,8 @@ files = {}
 # Any published platform: the round trip is the same for each, and the machine running this may
 # have none.
 PLATFORM = "windows-x64"
+# The window's checks run as they do on a system with a published build, whatever runs this.
+checks.PLATFORM = PLATFORM
 
 
 def serve(doc, sig):
@@ -239,7 +241,8 @@ sentences = [phrases.available("2.64.0"), phrases.confirm_title("2.64.0"),
              phrases.CONFIRM_AFTER, phrases.CHECKING, phrases.DOWNLOADING,
              phrases.CHECKING_STAGE, phrases.READY_STAGE, phrases.CANCELLED_DOWNLOAD,
              phrases.COULD_NOT_DOWNLOAD, phrases.WRONG_CHECKSUM, phrases.COULD_NOT_CHECK,
-             phrases.CANNOT_CHECK, phrases.ALREADY_CHECKING, phrases.OFFER_CHANGED,
+             phrases.CANNOT_CHECK, phrases.NOT_PUBLISHED_HERE, phrases.ALREADY_CHECKING,
+             phrases.OFFER_CHANGED,
              phrases.not_back("2.64.0", 3), phrases.up_to_date("2.63.0"),
              phrases.skipped("2.64.0"), phrases.just_updated("2.64.0"),
              phrases.update_did_not_take("2.63.0", r"C:\x\AccessCasterSetup-v2.64.0.exe"),
@@ -347,6 +350,9 @@ with patched((checker, {"run": lambda running, skipped: found}),
 with patched((signing, {"is_configured": lambda key=None: False})):
     check("a build with no key says so", app_updates.check_now().get("message"),
           phrases.CANNOT_CHECK)
+with patched((checks, {"PLATFORM": None})):
+    check("a system with no published build says so", app_updates.check_now().get("message"),
+          phrases.NOT_PUBLISHED_HERE)
 
 print("\nTHE REPORT FROM THE FAR SIDE OF THE RESTART")
 reset()

@@ -7,6 +7,7 @@ Keys (on a Mac, Control is the Control key and Command takes Alt's place):
     Alt+1 to Alt+9             jump to a section
     F5                         read the current section from the desk again
     F12                        check for a new version of AccessCaster
+    Command+W                  close the window, on a Mac
 
 Arrowing the tree shows each page and leaves the focus in the tree. Selecting a section that has
 pages shows its first page.
@@ -44,6 +45,8 @@ from native.routing_section import RoutingSection
 # key as MOD_CONTROL on Windows) and sections take Command+digit there.
 SECTION_MOD = wx.MOD_CONTROL if sys.platform == "darwin" else wx.MOD_ALT
 PAGE_MOD = wx.MOD_RAW_CONTROL
+# Command+W closes a window in every Mac app; wx only gives it one through a menu.
+CLOSE_ON_COMMAND_W = sys.platform == "darwin"
 
 # The sections in tree order, which is also their SECTION_MOD+digit.
 SECTIONS = [
@@ -312,6 +315,9 @@ class MainFrame(Speaker, wx.Frame):
         if (key == wx.WXK_TAB and mods in (PAGE_MOD, PAGE_MOD | wx.MOD_SHIFT)
                 and not self._in_tabs()):
             self._step_page(-1 if mods & wx.MOD_SHIFT else 1)
+            return
+        if CLOSE_ON_COMMAND_W and key == ord("W") and mods == wx.MOD_CONTROL:
+            self.Close()
             return
         if mods == SECTION_MOD and ord("1") <= key <= ord("9"):
             index = key - ord("1")

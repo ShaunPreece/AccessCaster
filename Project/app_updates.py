@@ -239,6 +239,8 @@ def check_now() -> dict:
     global _offer
     if not signing.is_configured():
         return {"ok": False, "message": phrases.CANNOT_CHECK}
+    if checks.PLATFORM is None:
+        return {"ok": False, "message": phrases.NOT_PUBLISHED_HERE}
     with _lock:
         if _job is not None and _job.stage in _ACTIVE:
             return {"ok": False, "message": phrases.ALREADY_CHECKING}

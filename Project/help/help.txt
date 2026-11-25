@@ -59,7 +59,8 @@ The AccessCaster window is simple. On the left is a tree of nine categories, fro
 [Windows] - Ctrl and Tab, or Ctrl, Shift and Tab, move to the next or previous page in a category. On a page with tabs, they move between the tabs instead.
 [Mac] - Control and Tab, or Control, Shift and Tab, move to the next or previous page in a category. On a page with tabs, they move between the tabs instead.
 - F5 refreshes the category, fetching its current settings from the desk.
-- F12 checks for any updates for AccessCaster.
+[Windows] - F12 checks for any updates for AccessCaster.
+[Mac] - Command and W closes the window.
 [Windows] - NVDA and End, Insert and Page Down in JAWS, or Narrator and backslash reads the status bar, which tells you anything on the desk that needs your attention, such as a pad left on or a card nearly full.
 [Mac] - The status bar, the last thing in the window, tells you anything on the desk that needs your attention, such as a pad left on or a card nearly full.
 

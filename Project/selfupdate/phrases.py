@@ -147,6 +147,9 @@ COULD_NOT_CHECK = ("Could not check for an AccessCaster update just now. "
 # indistinguishable from a broken app.
 CANNOT_CHECK = "This build of AccessCaster cannot check for updates."
 
+# No build is published for this system (`check.PLATFORM` is None), so there is nothing to ask for.
+NOT_PUBLISHED_HERE = "AccessCaster does not update itself on this system yet."
+
 # A check or a download is already running, so a second press does not start
 # another.
 ALREADY_CHECKING = "AccessCaster is already checking for an update."
