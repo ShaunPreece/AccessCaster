@@ -1889,6 +1889,14 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 
 ## Native window
 
+- **ON macOS wx READS COMMAND AS `MOD_CONTROL`.** Command+Tab is the system's app switcher and
+  Option+digit types a character, so `MainFrame` steps pages on `MOD_RAW_CONTROL` (the real
+  Control key, the same key as `MOD_CONTROL` on Windows) and takes sections on Command+digit there
+  (`frame.SECTION_MOD`). A key written as `MOD_CONTROL` is Command on a Mac.
+- **A USER'S QUIT ON macOS IS THE MENU'S QUIT, NOT THE SESSION ENDING**
+  (`TrayApp._on_query_end_session`). Command+Q and the Dock's Quit reach wx as the same question
+  as a logout; `tray.quit_asked_by_user` tells them apart by the quit Apple event's reason, which
+  only a logout, restart or shutdown carries. Without it Command+Q exits at once, mid-restore.
 - **THE TRAY ICON IS ADDED AGAIN ON `TaskbarCreated`** (`tray.TrayApp._on_taskbar_created`). Explorer's
   restart removes every notification icon, and without it the app runs on with Quit and its menu
   out of reach. `test_win_tray` checks it.
@@ -2793,6 +2801,10 @@ verbatim against the publishing tool's own copy. When to ask and who is told is 
 
 ## The app's lifecycle, and why it cannot be reasoned about from outside
 
+- **EVERY HANDLE ON THE DESK MUST OPEN ALONGSIDE THE OTHERS** (`rcp_hid` calls the platform's
+  `hid_access.share_devices` at import). hidapi opens a device exclusively on macOS by default,
+  and the listener holds the control interface open while each request opens it again, so on a
+  Mac without it every request after the listener fails.
 - **INTERVALS AND DEADLINES USE `time.monotonic()`.** A clock change makes wall-clock arithmetic
   fire a timeout early or never. `time.time()` is only for a time shown to a person (`read_at`).
 - **EACH ANNOUNCER LOOP CARRIES A GENERATION (`announcer._loop_gen`)** and leaves as soon as it is not the
