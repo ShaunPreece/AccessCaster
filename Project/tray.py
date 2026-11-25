@@ -31,6 +31,8 @@ The platform supplies:
     "&"), `owner.menu_chosen(key)`, `owner.notice_chosen()`, `owner.request_quit()`,
     `owner.session_ending()`, and reads `owner.quitting`.
   - `window_to_raise(handle)`: a modal dialog open on the window, or the window itself.
+  - `quit_asked_by_user()`: whether wx's end-session question, asked now, is the user quitting the
+    app rather than the session ending.
   - `find_running(wait_s)`: this session's running copy, or None, looking for up to `wait_s`.
   - `open_running(running)`: have that copy show and raise its window.
   - `show_refusal(text)`: a blocking native message, with no wx app running.
@@ -64,9 +66,11 @@ from selfupdate import phrases as update_phrases
 from wording import OS_NAME
 
 if sys.platform == "win32":
-    from win.tray import Icon, find_running, open_log, open_running, show_refusal, window_to_raise
+    from win.tray import (Icon, find_running, open_log, open_running, quit_asked_by_user,
+                          show_refusal, window_to_raise)
 elif sys.platform == "darwin":
-    from mac.tray import Icon, find_running, open_log, open_running, show_refusal, window_to_raise
+    from mac.tray import (Icon, find_running, open_log, open_running, quit_asked_by_user,
+                          show_refusal, window_to_raise)
 else:
     raise ImportError(f"No tray icon for {sys.platform}: the Windows one is win/tray.py")
 
@@ -118,8 +122,10 @@ class TrayApp:
         # The system ending the session closes the window through wx as well as through the icon.
         # wx's own answer to the query closes the window, which hides it, and so refuses to let the
         # session end; these replace it.
-        app.Bind(wx.EVT_QUERY_END_SESSION, lambda event: None)
+        app.Bind(wx.EVT_QUERY_END_SESSION, self._on_query_end_session)
         app.Bind(wx.EVT_END_SESSION, lambda event: self._end_now(_SESSION_ENDING))
+        # Choosing the Dock icon, or opening the app again, while it runs (macOS only).
+        app.on_reopen = self.open_window
         if open_window:
             self.open_window()
         # Started at sign-in, the announcer's greeting is what says the app is running. With the
@@ -253,6 +259,13 @@ class TrayApp:
     def session_ending(self) -> None:
         self._end_now(_SESSION_ENDING)
 
+    def _on_query_end_session(self, event) -> None:
+        """macOS asks this when the user quits the app as well as when the session ends. A user's
+        quit is the menu's Quit, which waits for a desk part-way through a change."""
+        if quit_asked_by_user() and event.CanVeto():
+            event.Veto()
+            wx.CallAfter(self.request_quit)
+
     def _end_now(self, why: str) -> None:
         """End the process at once: the service lets go of the shortcuts, the HID handles and the
         port, then the process exits without unwinding the window.
@@ -363,6 +376,15 @@ def _refuse_other_account(interactive: bool) -> None:
         show_refusal(_OTHER_ACCOUNT)
 
 
+class _App(wx.App):
+    """`on_reopen()` runs when macOS asks the running app to show itself."""
+    on_reopen = None
+
+    def MacReopenApp(self):
+        if self.on_reopen is not None:
+            self.on_reopen()
+
+
 def main() -> int:
     # STARTED AT SIGN-IN, OR BY A PERSON? (`autostart.started_at_login`) At sign-in we come up in
     # the tray with the announcer and the shortcuts live and open NOTHING: a window taking the focus
@@ -385,7 +407,7 @@ def main() -> int:
             open_running(running)
         return 0
 
-    app = wx.App()
+    app = _App()
     # An event loop of our own rather than `app.MainLoop`, which returns at once when no window
     # exists, as at sign-in, and ends when the last one is destroyed. This one runs until Quit.
     loop = wx.GUIEventLoop()

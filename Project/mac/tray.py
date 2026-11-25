@@ -11,11 +11,15 @@ import threading
 
 import wx
 import wx.adv
+from Foundation import NSAppleEventManager
 
 import diagnostics
 from paths import resource_path
 
 APP_NAME = "AccessCaster"
+# The quit Apple event's reason, present only when the system is logging out, restarting or
+# shutting down.
+_QUIT_REASON = int.from_bytes(b"why?", "big")
 _SHOW_TIMEOUT_S = 10.0
 
 
@@ -87,6 +91,13 @@ class Icon:
 
 def window_to_raise(handle: int) -> int:
     return handle
+
+
+def quit_asked_by_user() -> bool:
+    """Command+Q and the Dock's Quit reach wx as the same question as a logout. The quit Apple
+    event carries a reason only for a logout, restart or shutdown, and Command+Q sends no event."""
+    event = NSAppleEventManager.sharedAppleEventManager().currentAppleEvent()
+    return event is None or event.attributeDescriptorForKeyword_(_QUIT_REASON) is None
 
 
 def find_running(wait_s: float):

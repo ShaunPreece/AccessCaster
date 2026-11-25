@@ -210,6 +210,11 @@ class Icon:
         return result.value
 
 
+def quit_asked_by_user() -> bool:
+    """Windows asks wx's end-session question only when the session is ending."""
+    return False
+
+
 def find_running(wait_s: float):
     """FindWindow sees only this desktop's windows, so another account's copy is never found."""
     deadline = time.monotonic() + wait_s
