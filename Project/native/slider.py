@@ -185,7 +185,10 @@ class SystemSlider(wx.Slider):
         self.SetLabel(label)
         self.SetPageSize(max(1, (hi - lo) // 10))
         self.acc = a11y.slider(self, value_words)
-        self.Bind(wx.EVT_SLIDER, self._on_moved)
+        # wx sends a scroll event before EVT_SLIDER for a move the NSSlider makes itself (mouse,
+        # VoiceOver's increment). Not EVT_SLIDER: the page's handler takes that without skipping,
+        # and VoiceOver would go on reading the value from when the slider took the focus.
+        self.Bind(wx.EVT_SCROLL, self._on_moved)
         # The keys move by the line and page sizes the app sets, which NSSlider has no notion of.
         self.Bind(wx.EVT_KEY_DOWN, self._on_key)
 
@@ -215,6 +218,7 @@ class SystemSlider(wx.Slider):
         if value == self.GetValue():
             return
         super().SetValue(value)
+        self.acc.changed()
         event = wx.CommandEvent(wx.wxEVT_SLIDER, self.GetId())
         event.SetEventObject(self)
         event.SetInt(value)
