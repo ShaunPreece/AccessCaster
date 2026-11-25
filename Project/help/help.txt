@@ -54,15 +54,20 @@ Shaun.
 The AccessCaster window is simple. On the left is a tree of nine categories, from Channels and Processing to Help and About; expand one with the right arrow to reach its pages. On the right is the page you have chosen, with its settings.
 
 - F6 moves between the tree and the page.
-- Alt and 1 to 9 jump to a category.
-- Ctrl and Tab, or Ctrl, Shift and Tab, move to the next or previous page in a category. On a page with tabs, they move between the tabs instead.
+[Windows] - Alt and 1 to 9 jump to a category.
+[Mac] - Command and 1 to 9 jump to a category.
+[Windows] - Ctrl and Tab, or Ctrl, Shift and Tab, move to the next or previous page in a category. On a page with tabs, they move between the tabs instead.
+[Mac] - Control and Tab, or Control, Shift and Tab, move to the next or previous page in a category. On a page with tabs, they move between the tabs instead.
 - F5 refreshes the category, fetching its current settings from the desk.
 - F12 checks for any updates for AccessCaster.
-- NVDA and End, Insert and Page Down in JAWS, or Narrator and backslash reads the status bar, which tells you anything on the desk that needs your attention, such as a pad left on or a card nearly full.
+[Windows] - NVDA and End, Insert and Page Down in JAWS, or Narrator and backslash reads the status bar, which tells you anything on the desk that needs your attention, such as a pad left on or a card nearly full.
+[Mac] - The status bar, the last thing in the window, tells you anything on the desk that needs your attention, such as a pad left on or a card nearly full.
 
-Closing the window leaves AccessCaster running in the notification area, so your keyboard shortcuts and the announcer keep working, and opening the app again brings the same window back. If you would rather closing the window quit the app, turn off Keep running in the system tray on the App settings General page.
+[Windows] Closing the window leaves AccessCaster running in the notification area, so your keyboard shortcuts and the announcer keep working, and opening the app again brings the same window back. If you would rather closing the window quit the app, turn off Keep running in the system tray on the App settings General page.
+[Mac] Closing the window leaves AccessCaster running in the menu bar, so your keyboard shortcuts and the announcer keep working, and opening the app again brings the same window back. If you would rather closing the window quit the app, turn off Keep running in the menu bar on the App settings General page.
 
-To reach the tray icon, press Windows and B, arrow to AccessCaster, then press Enter or the Applications key. Its menu has Open AccessCaster; Announcer, ticked while spoken announcements are on; Diagnostic log, the app's record of what it sent to the desk; Check for updates; and Quit. If the desk is part-way through something, such as a restore or copying a pad's sound, AccessCaster tells you and waits rather than quitting, so the desk is not left half written.
+[Windows] To reach the tray icon, press Windows and B, arrow to AccessCaster, then press Enter or the Applications key. Its menu has Open AccessCaster; Announcer, ticked while spoken announcements are on; Diagnostic log, the app's record of what it sent to the desk; Check for updates; and Quit. If the desk is part-way through something, such as a restore or copying a pad's sound, AccessCaster tells you and waits rather than quitting, so the desk is not left half written.
+[Mac] To reach the menu bar icon, press VoiceOver and M twice, which moves to the menu bar's icons, arrow to AccessCaster, then press VoiceOver and Space. Its menu has Open AccessCaster; Announcer, ticked while spoken announcements are on; Diagnostic log, the app's record of what it sent to the desk; Check for updates; and Quit. If the desk is part-way through something, such as a restore or copying a pad's sound, AccessCaster tells you and waits rather than quitting, so the desk is not left half written.
 
 # Getting around your RODECaster
 
@@ -138,7 +143,8 @@ A press plays a sound pad, or switches a voice effect or mixer action on, depend
 * Headphone knobs
 Each headphone output's own volume.
 
-# Channels and Processing (Alt+1)
+[Windows] # Channels and Processing (Alt+1)
+[Mac] # Channels and Processing (Command+1)
 
 Everything for one channel at a time: its mute and solo, its input settings, and the desk's processing. There is a page for every input channel on your desk. The SMART pads mix is the odd one out: it has a mute and a solo but no processing, because the desk applies none to the pads.
 
@@ -169,7 +175,8 @@ The desk's studio chain: equaliser, compressor (evens out loud and quiet), noise
 * Effects
 Mic channels only: echo and reverb, each with its own switch and settings.
 
-# Routing (Alt+2)
+[Windows] # Routing (Alt+2)
+[Mac] # Routing (Command+2)
 
 Where every sound goes, and how loud. Four pages: Output mixes, Fader assignment, Levels and Master Mix.
 
@@ -204,12 +211,14 @@ The amp type for each headphone output. High sensitivity is for quiet headphones
 On the Master Mix page. What this computer receives is either one mixed pair, or every channel separately so a program can record them apart; Send the separate tracks raw leaves the desk's processing off those, for processing later. What this computer sends is either one stereo input, or Expanded: four separate inputs, Game, Music, A and B, each on a fader of its own. Changing either drops the desk's audio for a few seconds, your screen reader included if it speaks through the desk.
 
 * Using Expanded
-Put music, a call, a game and your screen reader on separate faders, so you can duck the music under a guest, or keep your screen reader out of a caller's ears and out of the recording. It needs RODE's Virtual Devices driver, which the page can download and install for you after checking it is signed by RODE. While that driver is installed, the RODECaster ASIO driver stops working. The ASIO driver can also stop while Windows plays sound through the RODECaster, so a screen reader speaking through the desk's Main Stereo output may stop it even without the Virtual Devices driver. If ASIO stops working, send your screen reader to another output. Each input only appears in Windows while it is on a fader, so assign them on Fader assignment first, then choose one for each program in Windows Settings, System, Sound, Volume mixer. Going back to Standard takes them off their faders.
+[Windows] Put music, a call, a game and your screen reader on separate faders, so you can duck the music under a guest, or keep your screen reader out of a caller's ears and out of the recording. It needs RODE's Virtual Devices driver, which the page can download and install for you after checking it is signed by RODE. While that driver is installed, the RODECaster ASIO driver stops working. The ASIO driver can also stop while Windows plays sound through the RODECaster, so a screen reader speaking through the desk's Main Stereo output may stop it even without the Virtual Devices driver. If ASIO stops working, send your screen reader to another output. Each input only appears in Windows while it is on a fader, so assign them on Fader assignment first, then choose one for each program in Windows Settings, System, Sound, Volume mixer. Going back to Standard takes them off their faders.
+[Mac] Put music, a call, a game and your screen reader on separate faders, so you can duck the music under a guest, or keep your screen reader out of a caller's ears and out of the recording. On a Mac this is RODE's Virtual Devices app, which the page can download and install for you after checking it is signed by RODE. In that app, choose which program plays into Game, Music, A and B, with USB 1 input set to Expanded. AccessCaster cannot yet tell whether that app is running or connected to the desk.
 
 * Master output processing
 Also on Master Mix, and it affects everyone. The Compellor evens out and glues together the whole mix, and output delay holds the outputs back by up to two seconds to line audio up with video.
 
-# SMART pads (Alt+3)
+[Windows] # SMART pads (Alt+3)
+[Mac] # SMART pads (Command+3)
 
 Setting up the pads in every bank: what each pad does and how it behaves, your own voice effects, and jobs on the whole set of pads. To play pads from the keyboard, see the pad shortcuts on App settings, Keyboard shortcuts: the number row plays the pads of the bank the desk is on.
 
@@ -237,7 +246,8 @@ Build your own effect from reverb, echo and more, and save it to the list of voi
 * Pad maintenance
 Clear all pads empties every pad except the built-in System pads. Restore the pads from a backup puts them back from a backup on this computer, sounds included. Restore the factory voice effects, Censor and Ducking rebuilds those eight pads, but not RODE's factory sounds, which only a backup or a factory reset can bring back. Tidy up unused pad audio deletes sound files no pad plays any more. Export this pad's sound copies it to Documents, AccessCaster, Pad exports, for when the desk holds the only copy. Anything that copies sounds to the desk takes about fifteen seconds a pad.
 
-# Recording (Alt+4)
+[Windows] # Recording (Alt+4)
+[Mac] # Recording (Command+4)
 
 The desk's own recorder, which writes to a memory card, or to a USB drive in the desk's second USB port. Recording started or stopped on the desk itself shows here too. The desk's internal storage holds the pad sounds and cannot take a recording.
 
@@ -265,7 +275,8 @@ What is on the card or drive, newest first, with the date and length. You can de
 * Card and drive
 Eject a card or drive before pulling it out, so nothing is lost mid-write; Reconnect puts it back in use without unplugging it. Erase deletes everything on it.
 
-# CallMe (Alt+5)
+[Windows] # CallMe (Alt+5)
+[Mac] # CallMe (Command+5)
 
 CallMe lets people call your RODECaster directly, and lets you call them. Anyone with a RODECaster of their own can call your desk's code, and anyone else can call from a web browser by opening your guest link, with nothing to install. Calls go over the desk's own wifi or network cable, not this computer, and they are announced wherever you are, so you do not need to be on this page when one comes in.
 
@@ -273,7 +284,8 @@ CallMe lets people call your RODECaster directly, and lets you call them. Anyone
 A call cannot connect while the desk is offline or CallMe 1 is on no fader, and neither the desk nor the guest is told why. Until both are fixed, the page shows only what is wrong, with the fix beside it.
 
 * Current call
-Who is calling, who you are calling, or who you are talking to, then Answer, Decline or Hang up, and Extend the call. Decline always turns a ringing call away first, so a second caller is declined rather than the guest you are with being cut off. From any program, Ctrl, Alt and Shift with C answers and with D declines or hangs up. During a call, its length and its quality are listed below.
+[Windows] Who is calling, who you are calling, or who you are talking to, then Answer, Decline or Hang up, and Extend the call. Decline always turns a ringing call away first, so a second caller is declined rather than the guest you are with being cut off. From any program, Ctrl, Alt and Shift with C answers and with D declines or hangs up. During a call, its length and its quality are listed below.
+[Mac] Who is calling, who you are calling, or who you are talking to, then Answer, Decline or Hang up, and Extend the call. Decline always turns a ringing call away first, so a second caller is declined rather than the guest you are with being cut off. From any program, Option, Shift and Command with C answers and with D declines or hangs up. During a call, its length and its quality are listed below.
 
 * The one-hour limit
 On RODE's free and standard plans a call ends after an hour unless it is extended. Five minutes before, you are told, and Extend the call, or the answer shortcut, gives it another hour. Extend calls automatically, on the Plan page, does it for you.
@@ -287,7 +299,8 @@ Type the code from the other desk's CallMe screen, or paste a guest link they ha
 * Plan
 Your CallMe plan, the minutes left and when they reset. The free plan, CallMe Lite, takes one guest at a time.
 
-# Backups (Alt+6)
+[Windows] # Backups (Alt+6)
+[Mac] # Backups (Command+6)
 
 Save the whole desk and put it back later: before a big change, before handing the desk to someone else, or to move between set-ups for different shows. Two pages: Backups, and Factory settings.
 
@@ -312,7 +325,8 @@ The first time AccessCaster meets a desk, it offers to back it up exactly as it 
 * Factory settings
 Puts every setting and every SMART pad back as the desk left the factory, including RODE's factory pad sounds. Your wifi, the language and your recordings are kept. The desk is backed up first unless you untick that, and that backup is your only way back. Unlike the desk's own reset, this skips the setup wizard that only works by touchscreen.
 
-# Device (Alt+7)
+[Windows] # Device (Alt+7)
+[Mac] # Device (Command+7)
 
 The desk itself: how it is right now, its hardware and firmware, the settings it otherwise keeps on its touchscreen, and its wireless connections. Settings for AccessCaster itself are on App settings.
 
@@ -328,7 +342,8 @@ The settings the desk otherwise offers only on its touchscreen: brightness, the 
 * Wireless connections
 Switch the desk's wifi on, scan for networks and join one. The desk lists ten networks at most, never hidden ones, and joining can take up to 45 seconds. To pair a phone, switch on Let other devices find this desk, then pair from the phone's own Bluetooth settings; the desk stops being discoverable after a few minutes. The wireless mics the desk can see are listed with their battery levels.
 
-# App settings (Alt+8)
+[Windows] # App settings (Alt+8)
+[Mac] # App settings (Command+8)
 
 Everything about AccessCaster itself rather than the desk: what it says, its keyboard shortcuts, how it starts and closes, and its own updates. None of it is in a backup of the desk. Four pages: Announcements, Keyboard shortcuts, General and Updates.
 
@@ -339,19 +354,23 @@ Speaks what happens on the desk, so you know without the touchscreen: mutes and 
 Announcements have their own voice, output and volume, separate from your screen reader. The output matters: left on the RODECaster, announcements can end up in your recording and go quiet when you solo a channel, so your computer's own speakers or headphones are usually better. Refresh voices and outputs reads both lists again after you plug something in.
 
 * Warn when the main mix clips
-Says Main mix clipping when the desk's main mix reaches full scale. It listens to the desk as a Windows audio device, so it does not work over Remote Desktop.
+[Windows] Says Main mix clipping when the desk's main mix reaches full scale. It listens to the desk as a Windows audio device, so it does not work over Remote Desktop.
+[Mac] Says Main mix clipping when the desk's main mix reaches full scale. It listens to the desk as an audio input, so macOS asks once for permission to use the microphone.
 
 * Keyboard shortcuts
-Shortcuts that work in any program, even with this window closed, all held on the same keys, Ctrl, Alt and Shift to begin with. Add a shortcut offers over 100 commands, so anything you can do on a page can go on a key. A new install starts with seven: announcements on and off (A), mute every mic and open them again (M), start or stop a recording (R), hear the desk's state (S), bring this window to the front (O), answer a CallMe call (C), and decline or hang up (D). Each shortcut says what it did, unless you tell it not to. The mic key only reopens mics it muted itself, so it never opens a mic you had shut.
+[Windows] Shortcuts that work in any program, even with this window closed, all held on the same keys, Ctrl, Alt and Shift to begin with. Add a shortcut offers over 100 commands, so anything you can do on a page can go on a key. A new install starts with seven: announcements on and off (A), mute every mic and open them again (M), start or stop a recording (R), hear the desk's state (S), bring this window to the front (O), answer a CallMe call (C), and decline or hang up (D). Each shortcut says what it did, unless you tell it not to. The mic key only reopens mics it muted itself, so it never opens a mic you had shut.
+[Mac] Shortcuts that work in any program, even with this window closed, all held on the same keys, Option, Shift and Command to begin with. Add a shortcut offers over 100 commands, so anything you can do on a page can go on a key. A new install starts with seven: announcements on and off (A), mute every mic and open them again (M), start or stop a recording (R), hear the desk's state (S), bring this window to the front (O), answer a CallMe call (C), and decline or hang up (D). Each shortcut says what it did, unless you tell it not to. The mic key only reopens mics it muted itself, so it never opens a mic you had shut.
 
 * Playing pads from the keyboard
 Use the SMART pad keys adds a set along the number row: 1 to 8 play the pads of the bank the desk is on (1 to 6 on a Duo), dash and equals step down and up through the banks that have pads on them, and P says what is playing and how long is left. These keys stay silent, because the pad itself is the feedback. You can also put one particular pad on a key of its own, which plays that pad whatever bank the desk is on. Playing a sound pad switches the desk's MIDI control on, because that is the only way to make the desk play a sound.
 
 * General
-Start AccessCaster when you sign in to Windows starts it in the tray, so your shortcuts work from the moment you sign in. Keep running in the system tray when the window is closed is on to begin with; switch it off and closing the window quits the app. Save this app's settings to a file keeps your shortcuts, announcement choices and CallMe contacts in one small file, to restore later or copy to another computer.
+[Windows] Start AccessCaster when you sign in to Windows starts it in the tray, so your shortcuts work from the moment you sign in. Keep running in the system tray when the window is closed is on to begin with; switch it off and closing the window quits the app. Save this app's settings to a file keeps your shortcuts, announcement choices and CallMe contacts in one small file, to restore later or copy to another computer.
+[Mac] Start AccessCaster when you sign in to macOS starts it in the menu bar, so your shortcuts work from the moment you sign in. Keep running in the menu bar when the window is closed is on to begin with; switch it off and closing the window quits the app. Save this app's settings to a file keeps your shortcuts, announcement choices and CallMe contacts in one small file, to restore later or copy to another computer.
 
 * Updates
-AccessCaster looks for a newer version of itself once a day, or as often as you set, and never installs one without asking. Press F12, or use the tray menu, to hear what changed, then Install now, Skip this version or Later. Installing closes AccessCaster for a moment and starts it again on the new version. It only contacts updates.slightperception.com, and refuses any version that is not signed as ours. On the same schedule, AccessCaster asks a connected desk whether RODE has newer firmware, and if it has, a Windows notification tells you, once for each version. Choosing the notification opens Device, Hardware and asks whether to install it, as Install firmware there does. Nothing is installed without asking, and a desk is not asked until it has been offered its as-found backup.
+[Windows] AccessCaster looks for a newer version of itself once a day, or as often as you set, and never installs one without asking. Press F12, or use the tray menu, to hear what changed, then Install now, Skip this version or Later. Installing closes AccessCaster for a moment and starts it again on the new version. It only contacts updates.slightperception.com, and refuses any version that is not signed as ours. On the same schedule, AccessCaster asks a connected desk whether RODE has newer firmware, and if it has, a Windows notification tells you, once for each version. Choosing the notification opens Device, Hardware and asks whether to install it, as Install firmware there does. Nothing is installed without asking, and a desk is not asked until it has been offered its as-found backup.
+[Mac] AccessCaster for the Mac does not look for newer versions of itself yet. Once a day, or as often as you set, it asks a connected desk whether RODE has newer firmware, and if it has, a notification tells you, once for each version. Choosing the notification opens Device, Hardware and asks whether to install it, as Install firmware there does. Nothing is installed without asking, and a desk is not asked until it has been offered its as-found backup.
 
 # Troubleshooting
 
@@ -398,9 +417,9 @@ Choose Restore the factory voice effects, Censor and Ducking on SMART pads, Pad 
 
 A call cannot connect while the desk is offline or CallMe 1 is on no fader, and neither you nor the caller is told why. The CallMe page shows what is wrong, with the fix beside it. If a code you have saved stops working, its owner has switched incoming calls off and on, which gives the desk a new code.
 
-## A Virtual Devices input is missing from Windows
+[Windows] ## A Virtual Devices input is missing from Windows
 
-Each of Game, Music, A and B only appears in Windows while it is on a fader. Assign it on Routing, Fader assignment.
+[Windows] Each of Game, Music, A and B only appears in Windows while it is on a fader. Assign it on Routing, Fader assignment.
 
 ## The encoder no longer changes the virtual faders
 

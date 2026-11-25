@@ -10,8 +10,11 @@ The file's format, which the website's guide importer reads as well:
   line in the same block is a line break the reader keeps.
 - `- text` is a list item, a line each; consecutive items need no blank line between them.
 - `* Term` names a term, and the rest of its block is the term's description.
+- A line opening `[Windows] ` or `[Mac] ` is read only on that system, without its mark. A
+  heading can be marked too, so a topic can name each system's keys in its title.
 """
 import re
+import sys
 import webbrowser
 
 import wx
@@ -24,6 +27,8 @@ TITLE = "Help and About"
 SUPPORT_URL = "https://slightperception.com/support/"
 CREDIT = "Version {}. Developed by Shaun Preece."
 SUPPORT_TOPIC = "Support this project"
+SYSTEM = "Mac" if sys.platform == "darwin" else "Windows"
+_MARK = re.compile(r"^\[(Windows|Mac)\] ")
 
 
 def slug(title):
@@ -58,13 +63,19 @@ def _blocks(lines, start):
     return out
 
 
-def topics(path=None):
-    """[(key, title, text)] from help.txt, the first topic opening with the version."""
+def topics(path=None, system=SYSTEM):
+    """[(key, title, text)] from help.txt as `system` ("Windows" or "Mac") reads it, the first
+    topic opening with the version."""
     with open(path or resource_path("help", "help.txt"), encoding="utf-8-sig") as fh:
         lines = fh.read().splitlines()
     # (level, title, first body line number, body lines)
     sections = []
     for number, line in enumerate(lines, 1):
+        mark = _MARK.match(line)
+        if mark:
+            if mark.group(1) != system:
+                continue
+            line = line[mark.end():]
         match = re.match(r"^(#{1,2}) (.+)$", line)
         if match:
             sections.append((len(match.group(1)), match.group(2).strip(), number + 1, []))

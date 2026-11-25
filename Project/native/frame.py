@@ -1,6 +1,6 @@
 """The main window: the Categories tree on the left, the selected page on the right.
 
-Keys:
+Keys (on a Mac, Control is the Control key and Command takes Alt's place):
     F6                         move between the tree and the page
     Ctrl+Tab, Ctrl+Shift+Tab   the next or previous page in the same section, or inside a page
                                with tabs, the next or previous tab
@@ -15,6 +15,8 @@ The window belongs to the tray (`tray.TrayApp`), which runs the service. Closing
 the tray shows it again with `present`; only Quit destroys it. With
 `app_settings_actions.keep_in_tray` off, closing asks the tray to quit (`quit_app`).
 """
+import sys
+
 import wx
 
 import app_settings_actions
@@ -37,7 +39,13 @@ from native.pages import Speaker, dip, gap
 from native.recording_section import RecordingSection
 from native.routing_section import RoutingSection
 
-# The sections in tree order, which is also their Alt+digit.
+# wx reads Command as MOD_CONTROL on macOS, where Command+Tab is the system's app switcher and
+# Option+digit types a character, so pages step on the real Control key (MOD_RAW_CONTROL, the same
+# key as MOD_CONTROL on Windows) and sections take Command+digit there.
+SECTION_MOD = wx.MOD_CONTROL if sys.platform == "darwin" else wx.MOD_ALT
+PAGE_MOD = wx.MOD_RAW_CONTROL
+
+# The sections in tree order, which is also their SECTION_MOD+digit.
 SECTIONS = [
     ChannelsSection,
     RoutingSection,
@@ -301,11 +309,11 @@ class MainFrame(Speaker, wx.Frame):
         if key == wx.WXK_F12 and mods == wx.MOD_NONE:
             self.check_updates()
             return
-        if (key == wx.WXK_TAB and mods in (wx.MOD_CONTROL, wx.MOD_CONTROL | wx.MOD_SHIFT)
+        if (key == wx.WXK_TAB and mods in (PAGE_MOD, PAGE_MOD | wx.MOD_SHIFT)
                 and not self._in_tabs()):
             self._step_page(-1 if mods & wx.MOD_SHIFT else 1)
             return
-        if mods == wx.MOD_ALT and ord("1") <= key <= ord("9"):
+        if mods == SECTION_MOD and ord("1") <= key <= ord("9"):
             index = key - ord("1")
             if index < len(self.sections):
                 self.tree.select(index)

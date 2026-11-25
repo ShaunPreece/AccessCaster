@@ -193,6 +193,18 @@ check_true("no topic is empty", all(text for _k, _t, text in topics))
 check_true("no heading line reaches the text", not any(line.startswith("#")
                                                        for _k, _t, text in topics
                                                        for line in text.splitlines()))
+for system, other in (("Windows", "Mac"), ("Mac", "Windows")):
+    marked = help_section.topics(system=system)
+    every_line = [line for _k, title, text in marked for line in [title, *text.splitlines()]]
+    check_true(f"{system}'s help keeps no mark", not any(help_section._MARK.match(line)
+                                                         for line in every_line))
+    check("and has every topic, once", [key for key, _t, _x in marked], keys)
+mac = dict((key, text) for key, _title, text in help_section.topics(system="Mac"))
+windows = dict((key, text) for key, _title, text in help_section.topics(system="Windows"))
+check_true("a Mac line reaches only the Mac", "Option, Shift and Command" in mac["app-settings"]
+           and "Option, Shift and Command" not in windows["app-settings"])
+check_true("a Windows line reaches only Windows", "Windows and B" in windows["getting-around-the-app"]
+           and "Windows and B" not in mac["getting-around-the-app"])
 
 _a11y.check_windows("App settings")
 sys.exit(_testkit.finish())
