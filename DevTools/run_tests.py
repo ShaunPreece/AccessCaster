@@ -6,7 +6,8 @@
 
 An offline suite is a `test_*.py` whose name does not end `_live.py`. A `_live` suite drives the
 attached desk and is never run from here, whatever is asked for. A `test_win_*.py` suite tests
-Windows' half of the platform layer and runs only on Windows. A suite that does not import
+Windows' half of the platform layer and runs only on Windows, and a `test_mac_*.py` suite the
+Mac's, only on macOS. A suite that does not import
 `_bootstrap` is reported as a failure and not run, because `_bootstrap` is what refuses device
 writes inside a test.
 
@@ -39,6 +40,8 @@ def offline_suites(words: list[str] | None = None) -> list[str]:
         if not (name.startswith("test_") and name.endswith(".py")) or name.endswith("_live.py"):
             continue
         if name.startswith("test_win_") and sys.platform != "win32":
+            continue
+        if name.startswith("test_mac_") and sys.platform != "darwin":
             continue
         if words and not any(word in name for word in words):
             continue

@@ -12,7 +12,7 @@ installer checkbox cannot know, months later, that somebody has decided to try E
 cannot help an install that already happened. The installer stays out of it.
 
 WHAT IT DOES NOT DO: install silently. RODE's own installer runs with the system's normal installer
-UI and its normal permission prompt. A program that installs a kernel driver without showing you is not one
+UI and its normal permission prompt. A program that installs a driver without showing you is not one
 anybody should trust, and ours is not going to be the first.
 
 THE SIGNATURE IS THE CHECK, NOT A HASH. The URL carries no version and RODE replace the file in
