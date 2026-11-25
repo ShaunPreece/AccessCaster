@@ -20,6 +20,7 @@ documented in docs/RODECASTER_PROTOCOL.txt.
 from __future__ import annotations
 
 import contextlib
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -34,6 +35,16 @@ except ImportError as exc:  # pragma: no cover - environment problem, surfaced t
     raise ImportError(
         "hidapi is required. Install with: pip install hidapi"
     ) from exc
+
+# Every handle on the desk must be able to open alongside the others (the platform's half says
+# why it might not).
+if sys.platform == "win32":
+    from win.hid_access import share_devices
+elif sys.platform == "darwin":
+    from mac.hid_access import share_devices
+else:
+    raise ImportError(f"No HID access for {sys.platform}: the Windows one is win/hid_access.py")
+share_devices()
 
 
 RODE_VENDOR_ID = 0x19F7
