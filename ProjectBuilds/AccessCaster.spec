@@ -57,22 +57,22 @@ if sys.platform == 'win32':
 
     # 040904B0 = US English + Unicode, matching the Translation pair (1033, 1200) below.
     _VERSION_RES = f"""VSVersionInfo(
-      ffi=FixedFileInfo(filevers={_vers}, prodvers={_vers}, mask=0x3f, flags=0x0,
-                        OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
-      kids=[
-        StringFileInfo([StringTable('040904B0', [
-            StringStruct('CompanyName', 'Shaun Preece'),
-            StringStruct('FileDescription', 'AccessCaster'),
-            StringStruct('FileVersion', '{_VERSION}'),
-            StringStruct('InternalName', 'AccessCaster'),
-            StringStruct('OriginalFilename', 'AccessCaster.exe'),
-            StringStruct('ProductName', 'AccessCaster'),
-            StringStruct('ProductVersion', '{_VERSION}'),
-        ])]),
-        VarFileInfo([VarStruct('Translation', [1033, 1200])]),
-      ]
-    )
-    """
+  ffi=FixedFileInfo(filevers={_vers}, prodvers={_vers}, mask=0x3f, flags=0x0,
+                    OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
+  kids=[
+    StringFileInfo([StringTable('040904B0', [
+        StringStruct('CompanyName', 'Shaun Preece'),
+        StringStruct('FileDescription', 'AccessCaster'),
+        StringStruct('FileVersion', '{_VERSION}'),
+        StringStruct('InternalName', 'AccessCaster'),
+        StringStruct('OriginalFilename', 'AccessCaster.exe'),
+        StringStruct('ProductName', 'AccessCaster'),
+        StringStruct('ProductVersion', '{_VERSION}'),
+    ])]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])]),
+  ]
+)
+"""
     # Written beside the spec and GITIGNORED. It is left on disk rather than made in a temp file so
     # a failed build can be inspected: "what did the exe actually get stamped with" is otherwise
     # unanswerable after the fact.
