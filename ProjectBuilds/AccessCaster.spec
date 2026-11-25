@@ -1,21 +1,24 @@
 # -*- mode: python ; coding: utf-8 -*-
 #
-# PyInstaller spec for AccessCaster (Windows tray app).
+# PyInstaller spec for AccessCaster, on Windows (a tray app) and on macOS (AccessCaster.app, with
+# its icon in the menu bar). Build on the platform being built for: PyInstaller does not
+# cross-compile.
 #
 # Entry point is tray.py: it starts the service, opens the native window (Project/native/), and
-# parks the app in the system tray. Built as onedir (a folder with AccessCaster.exe + an _internal/
-# dir), which is faster to start than onefile and lets the bundled assets sit on disk for inspection.
-# console=False so there is no console window (the pythonw equivalent).
+# parks the app in the system tray. Built as onedir (on Windows a folder with AccessCaster.exe and
+# an _internal/ dir), which is faster to start than onefile and lets the bundled assets sit on
+# disk for inspection. console=False so there is no console window (the pythonw equivalent).
 #
 # Read-only assets are bundled via `datas` and resolved at runtime by paths.resource_path (which
 # reads from sys._MEIPASS when frozen). User data (profiles, presets, settings.json) is NOT
-# bundled: it is created in %LOCALAPPDATA%\AccessCaster on first use (see paths.data_path).
+# bundled: it is created in the user's data folder on first use (see paths.data_path).
 
 # PyInstaller resolves relative paths in a spec against the SPEC FILE's own directory, not the
 # working directory. SPECPATH is that directory (ProjectBuilds/); the repo root is its parent.
 # We build ABSOLUTE paths from it so the build works regardless of where it is invoked from.
 import os
 import re
+import sys
 _ROOT = os.path.dirname(SPECPATH)
 _PROJ = os.path.join(_ROOT, 'Project')          # the app code + help/ + assets/
 _ASSETS = os.path.join(_ROOT, 'ProjectAssets')  # device data: fx_recipes, mic_presets
@@ -41,40 +44,41 @@ if not _m:
     raise SystemExit(f'AccessCaster.spec: could not read __version__ from {_vpath}')
 _VERSION = _m.group(1)
 
-# "MAJOR.MINOR.PATCH", padded to the four fields Windows compares as numbers, so 2.63.2 becomes
-# (2, 63, 2, 0) and outranks 2.9.0. Release versions only: AccessCaster ships no pre-release
-# builds, so a version with a label such as "-beta.1" stops the build here, by design.
-try:
-    _parts = [int(p) for p in _VERSION.split('.')]
-except ValueError:
-    raise SystemExit(f'AccessCaster.spec: __version__ {_VERSION!r} is not numeric, so no Windows '
-                     f'version resource can be built from it')
-_vers = tuple((_parts + [0, 0, 0, 0])[:4])
+if sys.platform == 'win32':
+    # "MAJOR.MINOR.PATCH", padded to the four fields Windows compares as numbers, so 2.63.2 becomes
+    # (2, 63, 2, 0) and outranks 2.9.0. Release versions only: AccessCaster ships no pre-release
+    # builds, so a version with a label such as "-beta.1" stops the build here, by design.
+    try:
+        _parts = [int(p) for p in _VERSION.split('.')]
+    except ValueError:
+        raise SystemExit(f'AccessCaster.spec: __version__ {_VERSION!r} is not numeric, so no '
+                         f'Windows version resource can be built from it')
+    _vers = tuple((_parts + [0, 0, 0, 0])[:4])
 
-# 040904B0 = US English + Unicode, matching the Translation pair (1033, 1200) below.
-_VERSION_RES = f"""VSVersionInfo(
-  ffi=FixedFileInfo(filevers={_vers}, prodvers={_vers}, mask=0x3f, flags=0x0,
-                    OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
-  kids=[
-    StringFileInfo([StringTable('040904B0', [
-        StringStruct('CompanyName', 'Shaun Preece'),
-        StringStruct('FileDescription', 'AccessCaster'),
-        StringStruct('FileVersion', '{_VERSION}'),
-        StringStruct('InternalName', 'AccessCaster'),
-        StringStruct('OriginalFilename', 'AccessCaster.exe'),
-        StringStruct('ProductName', 'AccessCaster'),
-        StringStruct('ProductVersion', '{_VERSION}'),
-    ])]),
-    VarFileInfo([VarStruct('Translation', [1033, 1200])]),
-  ]
-)
-"""
-# Written beside the spec and GITIGNORED. It is left on disk rather than made in a temp file so a
-# failed build can be inspected: "what did the exe actually get stamped with" is otherwise
-# unanswerable after the fact.
-_VERSION_FILE = os.path.join(SPECPATH, 'version_info.generated.txt')
-with open(_VERSION_FILE, 'w', encoding='utf-8') as fh:
-    fh.write(_VERSION_RES)
+    # 040904B0 = US English + Unicode, matching the Translation pair (1033, 1200) below.
+    _VERSION_RES = f"""VSVersionInfo(
+      ffi=FixedFileInfo(filevers={_vers}, prodvers={_vers}, mask=0x3f, flags=0x0,
+                        OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
+      kids=[
+        StringFileInfo([StringTable('040904B0', [
+            StringStruct('CompanyName', 'Shaun Preece'),
+            StringStruct('FileDescription', 'AccessCaster'),
+            StringStruct('FileVersion', '{_VERSION}'),
+            StringStruct('InternalName', 'AccessCaster'),
+            StringStruct('OriginalFilename', 'AccessCaster.exe'),
+            StringStruct('ProductName', 'AccessCaster'),
+            StringStruct('ProductVersion', '{_VERSION}'),
+        ])]),
+        VarFileInfo([VarStruct('Translation', [1033, 1200])]),
+      ]
+    )
+    """
+    # Written beside the spec and GITIGNORED. It is left on disk rather than made in a temp file so
+    # a failed build can be inspected: "what did the exe actually get stamped with" is otherwise
+    # unanswerable after the fact.
+    _VERSION_FILE = os.path.join(SPECPATH, 'version_info.generated.txt')
+    with open(_VERSION_FILE, 'w', encoding='utf-8') as fh:
+        fh.write(_VERSION_RES)
 
 # Source files live under Project/ and ProjectAssets/, but are bundled FLAT into the frozen app so
 # paths.resource_path finds them under sys._MEIPASS unchanged.
@@ -94,8 +98,14 @@ datas = [
 # comtypes is the level meters' only dependency (Project/meters.py talks to Windows' own audio
 # endpoints through it). It builds its COM interface wrappers at RUN time, so PyInstaller's import
 # detection sees less of it than it needs - name it, and its client module, explicitly.
-hiddenimports = ['hid', 'win32gui', 'win32con', 'win32api', 'win32process',
-                 'comtypes', 'comtypes.client', 'comtypes.stream']
+# The platform halves (Project/win/, Project/mac/) are imported under `if sys.platform`, which
+# PyInstaller's analysis follows, but each is named too so a missed one fails at build time.
+if sys.platform == 'win32':
+    hiddenimports = ['hid', 'win32gui', 'win32con', 'win32api', 'win32process',
+                     'comtypes', 'comtypes.client', 'comtypes.stream']
+else:
+    hiddenimports = ['hid', 'objc', 'AppKit', 'Foundation', 'AVFoundation',
+                     'PyObjCTools.AppHelper']
 
 
 a = Analysis(
@@ -125,7 +135,8 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     icon=os.path.join(_PROJ, 'assets', 'icon.ico'),
-    version=_VERSION_FILE,       # see the generated-version-info block at the top of this file
+    # see the generated-version-info block at the top of this file
+    version=_VERSION_FILE if sys.platform == 'win32' else None,
 )
 
 coll = COLLECT(
@@ -137,3 +148,23 @@ coll = COLLECT(
     upx_exclude=[],
     name='AccessCaster',
 )
+
+if sys.platform == 'darwin':
+    # The bundle identifier is also the sign-in LaunchAgent's label (Project/mac/autostart.py).
+    # PyInstaller turns the .ico into the bundle's .icns, with Pillow.
+    app = BUNDLE(
+        coll,
+        name='AccessCaster.app',
+        icon=os.path.join(_PROJ, 'assets', 'icon.ico'),
+        bundle_identifier='io.github.shaunpreece.accesscaster',
+        version=_VERSION,
+        info_plist={
+            'CFBundleDisplayName': 'AccessCaster',
+            'CFBundleShortVersionString': _VERSION,
+            'CFBundleVersion': _VERSION,
+            'NSHighResolutionCapable': True,
+            # Asked for the first time a level meter opens a microphone.
+            'NSMicrophoneUsageDescription':
+                'AccessCaster reads the level of the audio inputs you choose to meter.',
+        },
+    )
