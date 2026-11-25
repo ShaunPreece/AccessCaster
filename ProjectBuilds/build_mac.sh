@@ -3,9 +3,11 @@
 #
 #     zsh ProjectBuilds/build_mac.sh
 #
-# The Mac counterpart of build_installer.ps1's first three steps: a venv of its own built from the
-# pins, the pin check, the icon, and the freeze. The app is signed ad hoc, which runs on the
-# machine that built it; signing with a Developer ID, notarising and a disk image are not built.
+# The Mac counterpart of build_installer.ps1's freeze: a venv of its own built from the pins, the
+# pin check, and PyInstaller. The icon is the tracked Project/assets/icon.ico, not regenerated:
+# Pillow on a Mac writes different bytes for the same picture, which would leave the file changed
+# after every build. The app is signed ad hoc, which runs on the machine that built it; signing
+# with a Developer ID, notarising and a disk image are not built.
 #
 # THE BASE PYTHON DECIDES THE OLDEST macOS THE APP RUNS ON. A Homebrew Python is built for the
 # macOS it was installed on, and the app inherits that floor; python.org's universal2 installer
@@ -42,10 +44,7 @@ version=$(sed -nE 's/^__version__ *= *"([^"]+)".*/\1/p' Project/version.py)
 [[ -n $version ]] || { print -u2 "Could not read __version__ from Project/version.py"; exit 1; }
 print "==> Building AccessCaster $version"
 
-print "==> 1/2  Generating the app icon..."
-$py ProjectBuilds/gen_icon.py
-
-print "==> 2/2  Freezing the app with PyInstaller..."
+print "==> Freezing the app with PyInstaller..."
 rm -rf ProjectBuilds/dist/AccessCaster ProjectBuilds/dist/AccessCaster.app
 $py -m PyInstaller --noconfirm --clean --distpath ProjectBuilds/dist \
     --workpath ProjectBuilds/build ProjectBuilds/AccessCaster.spec
