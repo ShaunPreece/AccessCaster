@@ -1,9 +1,11 @@
 """macOS's `driver_install`: RODE's .pkg, Gatekeeper's verdict on it, and the system's Installer.
 
-The archive holds one package, "RODE Virtual Devices-<version>.pkg", signed with RODE's Developer
-ID Installer certificate and notarised. Installer shows its own windows and asks for an
-administrator's password; the package restarts the system's audio service and starts RODE's menu
-bar app when it is done.
+The archive is the one RODE's Virtual Devices guide offers first for the Mac, and holds one
+package, "RODE Virtual Channels-<version>.pkg" (1.1.1), signed with RODE's Developer ID Installer
+certificate and notarised. Installer shows its own windows and asks for an administrator's
+password; the package restarts the system's audio service when it is done. The guide also offers a
+2.0 beta, RODECasterDriver_MACOS-BETA.zip, which replaces the driver with an app (see
+`mac/virtual_devices`).
 """
 from __future__ import annotations
 
@@ -11,8 +13,8 @@ import re
 import subprocess
 from typing import NamedTuple
 
-# The file RODE's Virtual Devices guide links. No version in the path: they replace it in place.
-ZIP_URL = "https://update.rode.com/virtual_dev_driver/RODECasterDriver_MACOS-BETA.zip"
+# No version in the path: RODE replace the file in place.
+ZIP_URL = "https://update.rode.com/virtual_dev_driver/RODECasterDriver_MACOS.zip"
 INSTALLER_SUFFIX = ".pkg"
 
 _SPCTL = "/usr/sbin/spctl"

@@ -22,13 +22,13 @@ check_true(st.phrase(), "not installed" in st.phrase())
 st = vd.DriverStatus(installed=True)
 check_true(st.phrase(), "service is not running" in st.phrase())
 
-# Where it cannot (a Mac): RODE's app, installed and running or not, and nothing waited for.
+# Where it cannot (a Mac): installed and running or not, and nothing waited for.
 with patched((vd, {"SEES_BINDING": False})):
-    check_true(vd.DriverStatus().phrase(), "app is not installed" in vd.DriverStatus().phrase())
+    check_true(vd.DriverStatus().phrase(), "not installed" in vd.DriverStatus().phrase())
     st = vd.DriverStatus(installed=True)
-    check_true(st.phrase(), "installed but not running" in st.phrase())
+    check_true(st.phrase(), "its app is not running" in st.phrase())
     st = vd.DriverStatus(installed=True, running=True)
-    check_true(st.phrase(), st.phrase().startswith("RODE's Virtual Devices app is running."))
+    check_true(st.phrase(), st.phrase().startswith("RODE's Virtual Devices driver is running."))
     reads = []
     with patched((vd, {"read_status": lambda: reads.append(1) or vd.DriverStatus(
             installed=True, running=True)})):

@@ -1,20 +1,22 @@
-"""macOS's `virtual_devices`: RODE's Virtual Devices app, which is installed and running or not,
-and nothing more this app can see or change.
+"""macOS's `virtual_devices`: whether RODE's Virtual Devices software is installed and running, and
+nothing more this app can see or change.
 
-What RODE ship for the Mac (2.0.0 beta) is not a driver and gives the system no devices of its own,
-unlike the Windows driver's Fader and System devices, so the endpoint half of the contract has
-nothing to act on, and the app's binding to the desk cannot be read (`SEES_BINDING`):
-  - `/Applications/RODE Virtual Devices.app`, bundle `com.rode.RODEVirtualChannels`, a menu bar
-    app (JUCE) started at sign-in by `/Library/LaunchAgents/com.rode.RODEVirtualChannels.plist`,
-    which sends its output to /tmp/RODEVirtualDevices.out and .err. It needs macOS 14.2.
-  - It captures the audio of apps the user picks with ScreenCaptureKit (so it asks for screen
-    recording) and plays each into one of four slots, Game, Music, A and B, on the desk's
-    "RODECaster Pro II Main Multitrack" or "RODECaster Duo Main Multitrack" device, which the
-    desk presents in Expanded mode. Slot assignments are kept per desk serial number.
-  - Its installer removes the 1.x HAL plug-in, which did create devices:
-    /Library/Audio/Plug-Ins/HAL/RodeVirtualChannels.driver.
-Unknown without a desk: whether its window and menu are usable with VoiceOver, and where it
-stores the slot assignments.
+RODE ship two kinds for the Mac, both signed by Freedman Electronics, and neither shows its binding
+to the desk (`SEES_BINDING`):
+  - 1.1.1, the archive their guide offers first (RODECasterDriver_MACOS.zip): a HAL plug-in,
+    /Library/Audio/Plug-Ins/HAL/RodeVirtualChannels.driver, which gives the system ten devices of
+    its own, and `/Applications/RODE Virtual Channels.app`. A program is sent to Game, Music, A or
+    B by choosing that device as its output in its own settings.
+  - 2.0 beta (RODECasterDriver_MACOS-BETA.zip, needs macOS 14.2): no plug-in, which its installer
+    removes, and `/Applications/RODE Virtual Devices.app`, a menu bar app (JUCE) that captures the
+    programs the user picks with ScreenCaptureKit and plays each into a slot on the desk's
+    "RODECaster Pro II Main Multitrack" or "RODECaster Duo Main Multitrack" device, which the desk
+    presents in Expanded mode. Slot assignments are kept per desk serial number.
+Both apps have the bundle id `com.rode.RODEVirtualChannels`, are started at sign-in by
+/Library/LaunchAgents/com.rode.RODEVirtualChannels.plist, and log to /tmp/RODEVirtualDevices.out
+and .err. Unknown without a desk: the plug-in's device names, how either is driven with
+VoiceOver, and where the slot assignments are stored. Until those are known, the endpoint half of
+the contract does nothing here.
 """
 import os
 import plistlib
@@ -22,23 +24,30 @@ import threading
 
 from mac.rode_app import running as _bundle_running
 
-APP = "/Applications/RODE Virtual Devices.app"
+# The 2.0 beta's app, then 1.1.1's, which also installs PLUG_IN.
+APPS = ("/Applications/RODE Virtual Devices.app", "/Applications/RODE Virtual Channels.app")
+PLUG_IN = "/Library/Audio/Plug-Ins/HAL/RodeVirtualChannels.driver"
 SEES_BINDING = False
 
 
+def _version(bundle: str) -> str:
+    try:
+        with open(os.path.join(bundle, "Contents", "Info.plist"), "rb") as file:
+            return str(plistlib.load(file).get("CFBundleShortVersionString", ""))
+    except (OSError, plistlib.InvalidFileException):
+        return ""
+
+
 def driver_state() -> dict:
-    if not os.path.isdir(APP):
+    apps = [app for app in APPS if os.path.isdir(app)]
+    if not apps and not os.path.isdir(PLUG_IN):
         return {"installed": False}
     try:
-        with open(os.path.join(APP, "Contents", "Info.plist"), "rb") as file:
-            version = str(plistlib.load(file).get("CFBundleShortVersionString", ""))
-    except (OSError, plistlib.InvalidFileException):
-        version = ""
-    try:
-        running = _bundle_running(os.path.basename(APP))
+        running = any(_bundle_running(os.path.basename(app)) for app in apps)
     except OSError:
         running = False
-    return {"installed": True, "running": running, "driver_version": version}
+    return {"installed": True, "running": running,
+            "driver_version": _version(apps[0]) if apps else _version(PLUG_IN)}
 
 
 def service_state() -> dict:

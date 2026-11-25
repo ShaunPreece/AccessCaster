@@ -79,13 +79,14 @@ class DriverStatus:
 
 
 def _app_phrase(status: DriverStatus) -> str:
-    """Where the binding cannot be seen, RODE's software is an app the user drives themselves."""
+    """Where the binding cannot be seen, only whether RODE's software is there and running."""
     if not status.installed:
-        return "RODE's Virtual Devices app is not installed on this computer."
+        return "RODE's Virtual Devices driver is not installed on this computer."
     if not status.running:
-        return "RODE's Virtual Devices app is installed but not running. Open it from Applications."
-    return ("RODE's Virtual Devices app is running. Choose a program for each of Game, Music, A "
-            "and B in it.")
+        return ("RODE's Virtual Devices driver is installed but its app is not running. Open it "
+                "from Applications.")
+    return ("RODE's Virtual Devices driver is running. Send each program to Game, Music, A or B "
+            "in its own sound settings, or in RODE's app.")
 
 
 def read_status() -> DriverStatus:
