@@ -15,6 +15,9 @@ OS_NAME = {"win32": "Windows", "darwin": "macOS"}.get(sys.platform, sys.platform
 TRAY = {"win32": "the system tray", "darwin": "the menu bar"}.get(sys.platform, "the system tray")
 # The keys that switch between open apps.
 APP_SWITCHER = {"win32": "Alt+Tab", "darwin": "Command+Tab"}.get(sys.platform, "Alt+Tab")
+# The keys that open the focused control's context menu.
+MENU_KEY = {"win32": "the Applications key",
+            "darwin": "VoiceOver, Shift and M"}.get(sys.platform, "the Applications key")
 
 
 def percent(level) -> int:

@@ -502,7 +502,7 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
             elif expect and out.status.running and not out.status.connected:
                 # STATE, NEVER AN INSTRUCTION. A replug is one more arrival in the same race, so
                 # asking for one reads as "this will fix it" when it may well not.
-                where = (f" Windows sound stays on {parking.name} until it does."
+                where = (f" {wording.OS_NAME} sound stays on {parking.name} until it does."
                          if parking is not None else "")
                 speech.say("RODE's driver has not connected to the desk, so the extra inputs are "
                          "not there." + where)
@@ -528,7 +528,7 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
         return ""   # the desk stayed on the bus and the service stays bound: nothing to wait for
     # The bind itself is announced by RODE's driver, so only the parked default is ours to say.
     parking = _virtual_devices_parking
-    return (f" Windows sound is on {parking.name} until RODE's driver connects."
+    return (f" {wording.OS_NAME} sound is on {parking.name} until RODE's driver connects."
             if parking is not None else "")
 
 
@@ -603,8 +603,8 @@ def action_install_driver() -> dict:
         diagnostics.event("driver.handed_over", got["signer"])
         return {"ok": True,
                 "message": ("RODE's installer is now running. Follow its prompts, allow the "
-                            "Windows permission request, and restart the computer if it asks. "
-                            "This page will show the driver once it is in.")}
+                            f"{wording.OS_NAME} permission request, and restart the computer if "
+                            "it asks. This page will show the driver once it is in.")}
 
     return _driver_job.start(_work,
                              message="Downloading RODE's driver, please wait.",

@@ -12,6 +12,7 @@ from native.calls import call
 from native.controls import AppliedChoice, Slider, Switch, percent_words
 from native.dialogs import JobDialog, confirm
 from native.pages import gap, labelled, page_body, read_only
+from wording import OS_NAME
 
 TITLE = "Master Mix"
 READ_ONLY = "Changing this is not enabled on this device yet."
@@ -24,7 +25,8 @@ DRIVER_POLL_MS = 3000
 DRIVER_UNKNOWN = "Whether RODE's driver is installed could not be read."
 DRIVER_MISSING = ("Expanded needs this driver. Downloading it connects to RODE's website, and only "
                   "ever when you press that button. The file is checked to be signed by RODE, and "
-                  "their own installer then runs and asks Windows for permission in the usual way.")
+                  f"their own installer then runs and asks {OS_NAME} for permission in the usual "
+                  "way.")
 DRIVER_INSTALLED = "The driver is installed. If it is not working, RODE's own installer can repair it."
 COMPELLOR = [("threshold", "Compellor threshold"), ("attack", "Compellor attack"),
              ("release", "Compellor release"), ("gain", "Compellor make-up gain")]
@@ -241,7 +243,7 @@ class MasterMixPage(scrolled.ScrolledPanel):
         if not confirm(self, "Download RODE's driver?",
                        "AccessCaster will connect to RODE's website, download their Virtual "
                        "Devices driver, check it is signed by RODE, and then run their installer. "
-                       "Windows will ask your permission, and the installer may want to restart "
+                       f"{OS_NAME} will ask your permission, and the installer may want to restart "
                        "the computer.", "Download and install"):
             self.frame.say("Cancelled. Nothing was downloaded.")
             return

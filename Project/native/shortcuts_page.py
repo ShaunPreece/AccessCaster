@@ -15,10 +15,10 @@ from native.dialogs import FormDialog, paragraphs, confirm
 from native.pages import (AFTER_FOCUS_MS, add_button, dip, gap, labelled, page_body, reply_text,
                           select, set_items)
 from native.controls import Switch, set_choices
-from wording import OS_NAME
+from wording import MENU_KEY, OS_NAME
 
-LIST_HINT = ("Press Enter to edit a shortcut, Delete to delete it, or the Applications key for "
-             "more options.")
+LIST_HINT = (f"Press Enter to edit a shortcut, Delete to delete it, or {MENU_KEY} for more "
+             "options.")
 EMPTY = "You have no shortcuts yet. Press Add a shortcut to make one."
 OFF_NOTE = " Shortcuts are off, so none of these combinations is in use."
 

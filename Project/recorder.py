@@ -30,6 +30,7 @@ comes back as.
 """
 from __future__ import annotations
 
+import sys
 import threading
 import time
 from datetime import datetime
@@ -240,10 +241,13 @@ USB_EXPANDED_HINT = ("Expanded adds Game, Music, A and B, each on its own fader.
 USB_DROP_HINT = "Audio drops for a couple of seconds, screen reader included."
 USB_EXPANDED_DROP_HINT = ("Audio drops for a couple of seconds, screen reader included, and plays "
                           "from this computer's speakers until the desk is back.")
-# Said in the reply to turning Expanded on, when it is needed. The Windows step that is still the
-# user's, because a program's output is a choice this app knows nothing about; pointing Windows'
-# default at System (RODECaster) the app does itself (virtual_devices.py).
-USB_EXPANDED_NEXT = ("Send a program to one of the four in Windows' App volume and device "
+# Said in the reply to turning Expanded on, when it is needed. The step that is still the user's,
+# because a program's output is a choice this app knows nothing about; on Windows, pointing the
+# default at System (RODECaster) the app does itself (virtual_devices.py). On a Mac the programs
+# are chosen in RODE's Virtual Devices app, which has no system devices to choose from.
+USB_EXPANDED_NEXT = ("Choose a program for each of the four in RODE's Virtual Devices app."
+                     if sys.platform == "darwin" else
+                     "Send a program to one of the four in Windows' App volume and device "
                      "preferences.")
 
 # What the two processing-bypass switches mean, in RODE's own terms and ours.
