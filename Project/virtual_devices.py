@@ -8,6 +8,8 @@ sending every channel. Getting the driver bound, its devices switched on, and th
 where the user can hear it is this module's job; the reasons it goes wrong are the platform's.
 
 The platform supplies:
+  - `SEES_BINDING`: whether this system shows the driver's binding to the desk. Where it does not,
+    `connected` is never set, nothing waits for a bind, and no bind is retried.
   - `driver_state()`: what the driver says about itself, as a dict of `DriverStatus` fields. Cheap,
     and never raises.
   - `service_state()`: everything this process can see of the driver's service right now, as a
@@ -39,13 +41,13 @@ from paths import data_path
 from wording import OS_NAME
 
 if sys.platform == "win32":
-    from win.virtual_devices import (default_to_system as _default_to_system, driver_state,
-                                     hold_default, park_default, service_state, sync_endpoints,
-                                     virtual_endpoint_counts, watch_endpoints)
+    from win.virtual_devices import (SEES_BINDING, default_to_system as _default_to_system,
+                                     driver_state, hold_default, park_default, service_state,
+                                     sync_endpoints, virtual_endpoint_counts, watch_endpoints)
 elif sys.platform == "darwin":
-    from mac.virtual_devices import (default_to_system as _default_to_system, driver_state,
-                                     hold_default, park_default, service_state, sync_endpoints,
-                                     virtual_endpoint_counts, watch_endpoints)
+    from mac.virtual_devices import (SEES_BINDING, default_to_system as _default_to_system,
+                                     driver_state, hold_default, park_default, service_state,
+                                     sync_endpoints, virtual_endpoint_counts, watch_endpoints)
 else:
     raise ImportError(f"No virtual devices for {sys.platform}: the Windows ones are "
                       "win/virtual_devices.py")
@@ -63,6 +65,8 @@ class DriverStatus:
 
     def phrase(self) -> str:
         """One sentence for a person, in the order the checks fail."""
+        if not SEES_BINDING:
+            return _app_phrase(self)
         if not self.installed:
             return "RODE's Virtual Devices driver is not installed on this computer."
         if not self.running:
@@ -72,6 +76,16 @@ class DriverStatus:
         if not self.connected:
             return "RODE's Virtual Devices driver is running but not connected to the desk."
         return f"RODE's Virtual Devices driver is connected to the {self.desk}."
+
+
+def _app_phrase(status: DriverStatus) -> str:
+    """Where the binding cannot be seen, RODE's software is an app the user drives themselves."""
+    if not status.installed:
+        return "RODE's Virtual Devices app is not installed on this computer."
+    if not status.running:
+        return "RODE's Virtual Devices app is installed but not running. Open it from Applications."
+    return ("RODE's Virtual Devices app is running. Choose a program for each of Game, Music, A "
+            "and B in it.")
 
 
 def read_status() -> DriverStatus:
@@ -87,11 +101,12 @@ CONNECT_WAIT_S = 6.0
 
 def wait_connected(timeout_s: float = CONNECT_WAIT_S) -> DriverStatus:
     """Poll the driver until it reports connected, or give up. Returns at once when the driver is
-    absent, stopped or switched off: none of those change by waiting."""
+    absent, stopped or switched off, or its binding cannot be seen: none of those change by
+    waiting."""
     at = time.monotonic()
     while True:
         st = read_status()
-        if st.connected or not (st.installed and st.running and st.enabled):
+        if st.connected or not (SEES_BINDING and st.installed and st.running and st.enabled):
             return st
         if time.monotonic() - at >= timeout_s:
             return st
@@ -275,6 +290,7 @@ def describe(expanded: Optional[bool] = None) -> dict:
             "virtual_active": active, "virtual_total": total, "text": text}
 
 
-__all__ = ["BIND_HISTORY_NAME", "CONNECT_WAIT_S", "FADERS_MISSING", "DriverStatus", "Outcome",
+__all__ = ["BIND_HISTORY_NAME", "CONNECT_WAIT_S", "FADERS_MISSING", "SEES_BINDING", "DriverStatus",
+           "Outcome",
            "Parking", "default_to_system", "describe", "keep_parked", "park_output", "read_status",
            "reconcile", "record_bind", "service_state", "wait_connected", "watch_endpoints"]

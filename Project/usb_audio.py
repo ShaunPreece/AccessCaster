@@ -466,8 +466,9 @@ def _virtual_devices_follow(raw_mode, arrived: bool) -> str:
                 if left:
                     attempts = 0 if fresh else attempts
                     continue
-                while (expect and out.status.running and out.status.enabled
-                       and not out.status.connected and attempts < _VIRTUAL_DEVICES_RETRIES):
+                while (expect and virtual_devices.SEES_BINDING and out.status.running
+                       and out.status.enabled and not out.status.connected
+                       and attempts < _VIRTUAL_DEVICES_RETRIES):
                     attempts += 1
                     if attempts == 1:
                         speech.say("RODE's driver missed the desk. Reconnecting it; the audio drops "

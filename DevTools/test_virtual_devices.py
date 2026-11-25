@@ -6,9 +6,11 @@ right thing. No desk, no driver.
 import _bootstrap  # noqa: F401
 import _testkit
 import virtual_devices as vd
-from _testkit import check_true
+from _testkit import check, check_true, patched
 from wording import OS_NAME
 
+# Where the binding can be seen (Windows), whatever runs this.
+vd.SEES_BINDING = True
 st = vd.DriverStatus(installed=True, running=True, connected=True, desk="RØDECaster Pro II (GV0064612)")
 check_true(st.phrase(), st.phrase().startswith("RODE's Virtual Devices driver is connected to the RØDECaster"))
 st = vd.DriverStatus(installed=True, running=True)
@@ -19,6 +21,19 @@ st = vd.DriverStatus()
 check_true(st.phrase(), "not installed" in st.phrase())
 st = vd.DriverStatus(installed=True)
 check_true(st.phrase(), "service is not running" in st.phrase())
+
+# Where it cannot (a Mac): RODE's app, installed and running or not, and nothing waited for.
+with patched((vd, {"SEES_BINDING": False})):
+    check_true(vd.DriverStatus().phrase(), "app is not installed" in vd.DriverStatus().phrase())
+    st = vd.DriverStatus(installed=True)
+    check_true(st.phrase(), "installed but not running" in st.phrase())
+    st = vd.DriverStatus(installed=True, running=True)
+    check_true(st.phrase(), st.phrase().startswith("RODE's Virtual Devices app is running."))
+    reads = []
+    with patched((vd, {"read_status": lambda: reads.append(1) or vd.DriverStatus(
+            installed=True, running=True)})):
+        vd.wait_connected(timeout_s=5)
+    check("a bind it cannot see is not waited for", len(reads), 1)
 
 # Wording.
 # The bind and the release are RODE's notification to say, never ours.

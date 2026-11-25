@@ -1,8 +1,9 @@
-"""A STAND-IN for RODE's macOS Virtual Devices: it reads as not installed, and nothing is changed.
+"""macOS's `virtual_devices`: RODE's Virtual Devices app, which is installed and running or not,
+and nothing more this app can see or change.
 
 What RODE ship for the Mac (2.0.0 beta) is not a driver and gives the system no devices of its own,
-unlike the Windows driver's Fader and System devices, so most of this module's contract has
-nothing to act on there:
+unlike the Windows driver's Fader and System devices, so the endpoint half of the contract has
+nothing to act on, and the app's binding to the desk cannot be read (`SEES_BINDING`):
   - `/Applications/RODE Virtual Devices.app`, bundle `com.rode.RODEVirtualChannels`, a menu bar
     app (JUCE) started at sign-in by `/Library/LaunchAgents/com.rode.RODEVirtualChannels.plist`,
     which sends its output to /tmp/RODEVirtualDevices.out and .err. It needs macOS 14.2.
@@ -10,16 +11,34 @@ nothing to act on there:
     recording) and plays each into one of four slots, Game, Music, A and B, on the desk's
     "RODECaster Pro II Main Multitrack" or "RODECaster Duo Main Multitrack" device, which the
     desk presents in Expanded mode. Slot assignments are kept per desk serial number.
-  - Its installer removes the 1.x HAL plug-in, /Library/Audio/Plug-Ins/HAL/RodeVirtualChannels.driver,
-    which did create devices.
+  - Its installer removes the 1.x HAL plug-in, which did create devices:
+    /Library/Audio/Plug-Ins/HAL/RodeVirtualChannels.driver.
 Unknown without a desk: whether its window and menu are usable with VoiceOver, and where it
 stores the slot assignments.
 """
+import os
+import plistlib
 import threading
+
+from mac.rode_app import running as _bundle_running
+
+APP = "/Applications/RODE Virtual Devices.app"
+SEES_BINDING = False
 
 
 def driver_state() -> dict:
-    return {"installed": False}
+    if not os.path.isdir(APP):
+        return {"installed": False}
+    try:
+        with open(os.path.join(APP, "Contents", "Info.plist"), "rb") as file:
+            version = str(plistlib.load(file).get("CFBundleShortVersionString", ""))
+    except (OSError, plistlib.InvalidFileException):
+        version = ""
+    try:
+        running = _bundle_running(os.path.basename(APP))
+    except OSError:
+        running = False
+    return {"installed": True, "running": running, "driver_version": version}
 
 
 def service_state() -> dict:

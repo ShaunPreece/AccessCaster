@@ -95,6 +95,10 @@ def _read_block() -> Optional[bytes]:
         _k32.CloseHandle(h)
 
 
+# The service's status block says whether it has bound to the desk.
+SEES_BINDING = True
+
+
 def driver_state() -> dict:
     """Block layout: three little-endian dwords, connected / enabled / a once-a-second heartbeat,
     then ANSI strings. The desk string starts at byte 12 and is overwritten in place, so a shorter
